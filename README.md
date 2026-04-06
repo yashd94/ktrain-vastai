@@ -30,9 +30,8 @@ Google Colab.
 - Sets `PYTHONPATH=/workspace` to mirror the Colab `sys.path` setup
 - Creates `/workspace/data` and `/workspace/results` for runtime I/O
 
-> **Note:** The repo is copied from your local machine (`COPY ktrain/`)
-> rather than cloned at build time, to avoid GitHub authentication issues
-> inside Docker.
+> **Note:** The `ktrain` repo is is included as a submodule.
+> On creation, a PAT is used to clone from source.
 
 ### run_worker.py
 
