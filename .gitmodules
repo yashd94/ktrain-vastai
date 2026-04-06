@@ -1,0 +1,3 @@
+[submodule "ktrain"]
+	path = ktrain
+	url = https://github.com/nullset-mit/ktrain.git
