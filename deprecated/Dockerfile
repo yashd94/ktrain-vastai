@@ -6,22 +6,23 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
 
 WORKDIR /workspace
 
-# Clone outer repo including the ktrain submodule
-ARG GITHUB_TOKEN
-RUN git clone --recurse-submodules https://${GITHUB_TOKEN}@github.com/nullset-mit/ktrain.git /workspace && git -C /workspace submodule update --init --recursive
-RUN git -C /workspace remote set-url origin https://github.com/nullset-mit/ktrain.git
+# Clone the repo
+RUN git clone https://github.com/nullset-mit/ktrain.git /workspace/ktrain
+COPY ktrain/ /workspace/ktrain/
+
 
 # Install dependencies
 RUN pip install --upgrade pip && \
-    pip install matplotlib medmnist numpy pandas scipy timm \
-                tqdm huggingface_hub
+    pip install matplotlib medmnist numpy pandas scipy timm torch \
+                torchvision tqdm huggingface_hub
 
-# Set PYTHONPATH so ktrain package imports work (mirrors Colab sys.path setup)
+# Set PYTHONPATH so ktrain package imports work
 ENV PYTHONPATH="/workspace:${PYTHONPATH}"
 
 # Create data and results dirs
 RUN mkdir -p /workspace/data /workspace/results
 
+# Copy the worker script (created below)
 COPY run_worker.py /workspace/run_worker.py
 
 ENTRYPOINT ["python3", "/workspace/run_worker.py"]
