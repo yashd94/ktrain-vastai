@@ -14,6 +14,7 @@ sys.path.insert(0, "/workspace")
 PARALLEL_RANK   = int(os.environ.get("PARALLEL_RANK", "0"))
 PARALLEL_SHARDS = int(os.environ.get("PARALLEL_SHARDS", "1"))
 DATA_FLAG       = os.environ.get("DATA_FLAG", "dermamnist")
+MAX_NUM_PARAMS = int(os.environ.get("MAX_NUM_PARAMS", "5000000"))
 
 print(f"Worker rank={PARALLEL_RANK}/{PARALLEL_SHARDS}, dataset={DATA_FLAG}")
 
@@ -29,7 +30,7 @@ PRED_DIR = str(dataset_pred_dir(DATA_FLAG))
 verify_image_quality(data_flag=DATA_FLAG)
 train_loader, val_loader, test_loader, info = get_loaders(data_flag=DATA_FLAG)
 
-model_list = filter_timm_models(max_params=5_000_000, cache_path=SHARED_MODEL_CACHE)
+model_list = filter_timm_models(max_params=MAX_NUM_PARAMS, cache_path=SHARED_MODEL_CACHE)
 model_names = [m["name"] for m in model_list]
 print(f"Total models: {len(model_names)}")
 
