@@ -29,7 +29,7 @@ PRED_DIR = str(dataset_pred_dir(DATA_FLAG))
 verify_image_quality(data_flag=DATA_FLAG)
 train_loader, val_loader, test_loader, info = get_loaders(data_flag=DATA_FLAG)
 
-model_list = filter_timm_models(max_params=200_000_000, cache_path=SHARED_MODEL_CACHE)
+model_list = filter_timm_models(max_params=5_000_000, cache_path=SHARED_MODEL_CACHE)
 model_names = [m["name"] for m in model_list]
 print(f"Total models: {len(model_names)}")
 
