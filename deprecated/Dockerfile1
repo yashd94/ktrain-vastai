@@ -22,13 +22,7 @@ ENV PYTHONPATH="/workspace:${PYTHONPATH}"
 # Create data and results dirs
 RUN mkdir -p /workspace/data /workspace/results
 
-RUN git clone https://${GITHUB_TOKEN}@github.com/yashd94/ktrain-vastai.git
+COPY run_worker.py /workspace/run_worker.py
 
-ENTRYPOINT ["/bin/bash", "-c", "cp ktrain-vastai/run_worker.py /workspace/run_worker.py && time python3 run_worker.py"]
+ENTRYPOINT ["python3", "/workspace/run_worker.py"]
 
-#ENTRYPOINT ["/bin/bash", "-c", \
-#  "curl -fsSL \
-#   -H 'Authorization: token '${GITHUB_TOKEN} \
-#   -H 'Accept: application/vnd.github.v3.raw' \
-#   https://api.github.com/repos/ktrain-vastai/contents/run_worker.py \
-#   -o /workspace/run_worker.py && python3 /workspace/run_worker.py"]
