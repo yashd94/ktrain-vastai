@@ -15,12 +15,12 @@ import os
 import re
 import shutil
 import argparse
+import zipfile
 import urllib.request
 import ssl
 from pathlib import Path
 from collections import defaultdict
 import random
-import csv
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -32,7 +32,14 @@ MALIGNANT_CLASSES = ["ductal_carcinoma", "lobular_carcinoma",
                      "mucinous_carcinoma", "papillary_carcinoma"]
 ALL_CLASSES       = BENIGN_CLASSES + MALIGNANT_CLASSES
 
+# Folder name patterns inside the BreakHis archive
+# e.g. SOB_B_A-14-22549AB-40-001.png
+#       ↑   ↑ ↑   ↑         ↑
+#       SOB B/M class  patient  magnification
 MAGNIFICATIONS = ["40X", "100X", "200X", "400X"]
+
+# Patient ID is encoded in the filename: SOB_{B/M}_{class}-{patient}-{mag}-{seq}.png
+PATIENT_RE = re.compile(r"SOB_[BM]_[^-]+-(\d+-\d+[A-Z]*)-\d+X-\d+\.png", re.IGNORECASE)
 
 # Train / val / test split ratios (by patient)
 TRAIN_RATIO = 0.70
@@ -71,61 +78,41 @@ def extract_archive(archive: Path, dest: Path) -> None:
 
 def find_images(root: Path, magnification: str) -> dict[str, list[Path]]:
     """
-    Walk the extracted BreakHis archive and collect all images for the
-    given magnification, grouped by class name.
-
-    Expected structure:
-        root/
-        └── histology_slides/breast/
-            ├── benign/SOB/
-            │   ├── adenosis/          SOB_B_A_<patient>/<mag>/*.png
-            │   ├── fibroadenoma/      SOB_B_F_<patient>/<mag>/*.png
-            │   ├── phyllodes_tumor/   SOB_B_PT_<patient>/<mag>/*.png
-            │   └── tubular_adenoma/   SOB_B_TA_<patient>/<mag>/*.png
-            └── malignant/SOB/
-                ├── ductal_carcinoma/  SOB_M_DC_<patient>/<mag>/*.png
-                ├── lobular_carcinoma/ SOB_M_LC_<patient>/<mag>/*.png
-                ├── mucinous_carcinoma/SOB_M_MC_<patient>/<mag>/*.png
-                └── papillary_carcinoma/SOB_M_PC_<patient>/<mag>/*.png
+    Walk the extracted archive and collect all images for the given
+    magnification, grouped by class name.
 
     Returns:
         { class_name: [Path, ...], ... }
     """
-    # Map archive folder names → canonical class names (1:1, no ambiguity)
+    # Map archive folder names → our canonical class names
     folder_to_class = {
-        "adenosis":            "adenosis",
-        "fibroadenoma":        "fibroadenoma",
-        "phyllodes_tumor":     "phyllodes_tumor",
-        "tubular_adenoma":     "tubular_adenoma",
-        "ductal_carcinoma":    "ductal_carcinoma",
-        "lobular_carcinoma":   "lobular_carcinoma",
-        "mucinous_carcinoma":  "mucinous_carcinoma",
-        "papillary_carcinoma": "papillary_carcinoma",
+        "A":   "adenosis",
+        "F":   "fibroadenoma",
+        "PT":  "phyllodes_tumor",
+        "TA":  "tubular_adenoma",
+        "DC":  "ductal_carcinoma",
+        "LC":  "lobular_carcinoma",
+        "MC":  "mucinous_carcinoma",
+        "PC":  "papillary_carcinoma",
     }
 
     images_by_class = defaultdict(list)
 
-    for class_folder, class_name in folder_to_class.items():
-        # Path pattern:
-        # histology_slides/breast/{benign|malignant}/SOB/{class_folder}/
-        #     SOB_{B|M}_{abbrev}-{patient}/{magnification}/*.png
-        class_dirs = list(root.rglob(f"**/SOB/{class_folder}"))
-
-        if not class_dirs:
-            print(f"  WARNING: no directory found for class '{class_folder}'")
-            continue
-
-        for class_dir in class_dirs:
-            # Each subdirectory is a patient folder e.g. SOB_M_MC_14-18842D
-            for patient_dir in sorted(class_dir.iterdir()):
-                if not patient_dir.is_dir():
-                    continue
-                # Each patient folder contains magnification subfolders
-                mag_dir = patient_dir / magnification
-                if not mag_dir.exists():
-                    continue
-                imgs = sorted(mag_dir.glob("*.png"))
-                images_by_class[class_name].extend(imgs)
+    for img_path in root.rglob(f"*{magnification}*.png"):
+        # Infer class from parent folder name (e.g. .../SOB/benign/adenosis/40X/...)
+        for part in img_path.parts:
+            part_upper = part.upper()
+            if part_upper in folder_to_class:
+                class_name = folder_to_class[part_upper]
+                images_by_class[class_name].append(img_path)
+                break
+        else:
+            # Fallback: infer from filename prefix
+            fname = img_path.stem.upper()
+            for abbrev, class_name in folder_to_class.items():
+                if f"_B_{abbrev}-" in fname or f"_M_{abbrev}-" in fname:
+                    images_by_class[class_name].append(img_path)
+                    break
 
     return dict(images_by_class)
 
@@ -133,23 +120,22 @@ def find_images(root: Path, magnification: str) -> dict[str, list[Path]]:
 def extract_patient_id(img_path: Path) -> str:
     """
     Extract patient ID from filename.
-    e.g. SOB_M_MC-14-18842D-200-009.png → "14-18842D"
-
-    Format: SOB_{B|M}_{abbrev}-{patient_part1}-{patient_part2}-{mag}-{seq}.png
-    Patient ID = parts[1] + "-" + parts[2] after splitting on "-"
+    e.g. SOB_B_A-14-22549AB-40-001.png → "14-22549AB"
+    Falls back to filename stem if pattern not matched.
     """
-    stem  = img_path.stem                   # SOB_M_MC-14-18842D-200-009
-    parts = stem.split("-")                 # ['SOB_M_MC', '14', '18842D', '200', '009']
-    if len(parts) >= 3:
-        return f"{parts[1]}-{parts[2]}"     # "14-18842D"
-    return stem                             # fallback
+    m = PATIENT_RE.match(img_path.name)
+    if m:
+        return m.group(1)
+    # Fallback: use the third dash-separated token
+    parts = img_path.stem.split("-")
+    return "-".join(parts[1:3]) if len(parts) >= 3 else img_path.stem
 
 
 def split_patients(
     patient_ids: list[str],
     train_ratio: float,
-    val_ratio:   float,
-    seed:        int = 42,
+    val_ratio: float,
+    seed: int = 42,
 ) -> tuple[set[str], set[str], set[str]]:
     """
     Split a list of patient IDs into train / val / test sets.
@@ -172,9 +158,9 @@ def split_patients(
 
 
 def copy_images(
-    images:      list[Path],
-    split:       str,
-    class_name:  str,
+    images:    list[Path],
+    split:     str,
+    class_name: str,
     output_root: Path,
 ) -> int:
     """Copy images into output_root/{split}/{class_name}/."""
@@ -273,7 +259,6 @@ def prepare_breakhis(
     print(f"{'Class':<25} {'Train':>8} {'Val':>8} {'Test':>8}")
     print(f"{'─' * 55}")
     total_train = total_val = total_test = 0
-    rows = []
     for cls in ALL_CLASSES:
         tr = split_counts["train"].get(cls, 0)
         va = split_counts["val"].get(cls, 0)
@@ -282,33 +267,9 @@ def prepare_breakhis(
         total_val   += va
         total_test  += te
         print(f"  {cls:<23} {tr:>8} {va:>8} {te:>8}")
-        rows.append({
-            "class":      cls,
-            "train":      tr,
-            "val":        va,
-            "test":       te,
-            "total":      tr + va + te,
-        })
     print(f"{'─' * 55}")
     print(f"  {'TOTAL':<23} {total_train:>8} {total_val:>8} {total_test:>8}")
     print(f"{'─' * 55}")
-    # Append totals row to CSV
-    rows.append({
-        "class": "TOTAL",
-        "train": total_train,
-        "val":   total_val,
-        "test":  total_test,
-        "total": total_train + total_val + total_test,
-    })
-
-    # Write CSV
-    csv_path = output_dir / "split_summary.csv"
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["class", "train", "val", "test", "total"])
-        writer.writeheader()
-        writer.writerows(rows)
-
-    print(f"\nSplit summary saved to: {csv_path}")
     print(f"\nOutput written to: {output_dir}")
     print(f"  {output_dir}/train/{{class_name}}/*.png")
     print(f"  {output_dir}/val/{{class_name}}/*.png")
@@ -367,3 +328,4 @@ if __name__ == "__main__":
         keep_archive=args.keep_archive,
         seed=args.seed,
     )
+

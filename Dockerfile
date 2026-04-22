@@ -1,7 +1,7 @@
 FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    tzdata python3.11 python3-pip git wget curl awscli \
+    tzdata git wget curl awscli \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
