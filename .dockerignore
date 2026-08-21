@@ -1,0 +1,24 @@
+# Keep the build context small: feature_cache/ and the venvs are gigabytes,
+# and a fat context is uploaded to the daemon on every build.
+.git
+.gitignore
+.venv/
+.venv-fit/
+.pytest_cache/
+**/__pycache__/
+*.pyc
+**/.DS_Store
+
+# Prelogit bundles. These are the image's OUTPUT; shipping them into it would
+# be both enormous and backwards.
+feature_cache/
+*.npz
+
+# Local orchestration state -- machine-specific, and .vast_instances names
+# live rented instances. Never bake it into an image.
+.vast_instances
+
+# Documentation and planning; the box does not read them.
+README.md
+docs/
+plan.md

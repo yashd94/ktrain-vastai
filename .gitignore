@@ -1,0 +1,14 @@
+.venv/
+ktrain-bundle.tgz
+__pycache__/
+*.pyc
+.DS_Store
+
+# vast.ai instance registry (ops/vast.py); machine-local, never shared
+.vast_instances
+/model_manifest.json
+# prelogit bundles: large, and reproducible from a config + a rented GPU
+*.npz
+
+# smoke-run scratch: logs, code tarball, downloaded bundles
+out/
