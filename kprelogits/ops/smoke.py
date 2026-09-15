@@ -86,10 +86,19 @@ IMAGE = "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime"
 # numerical path a real run takes -- fp16 autocast on tensor cores, and cudnn
 # picking TF32 kernels for convolutions. Ampere-class boxes are within a
 # rounding error of the Pascal price anyway.
+#
+# compute_cap<=900 is the other end of the same question: the image's torch
+# 2.5.1/cu124 carries kernels up to sm_90 and nothing beyond. A Blackwell card
+# (RTX 5060 Ti, compute capability 12.0) boots, stages and launches normally,
+# then fails every model with "no kernel image is available for execution on
+# the device" -- and those cards are the cheapest 16 GB offers, so cheapest-
+# first ordering walks straight into them (2026-09-14). The remote preflight
+# refuses such a box too (config._check_cuda_arch); this keeps them from being
+# rented in the first place. Raise the cap only together with the image.
 OFFER_QUERY = ("reliability>0.98 num_gpus=1 gpu_ram>=8 dph<0.40 "
                "inet_down>=200 disk_space>=50 rentable=true "
                "cpu_cores_effective>=8 cuda_max_good>=12.4 "
-               "compute_cap>=750")
+               "compute_cap>=750 compute_cap<=900")
 DISK_GB = 40          # legacy probe default; ops' 100 is 2.5x what this needs
 
 # MAX_TRAIN matches the production bundles' identity, so the result is
@@ -102,11 +111,25 @@ REMOTE_PATH = "export PATH=/opt/conda/bin:$PATH"
 # staged credentials itself. `set -a` exports what the file defines so awscli
 # and huggingface_hub see it without kprelogits reading the file.
 SOURCE_SECRETS = "set -a; . /workspace/.env-secrets; set +a;"
-PIP_PACKAGES = "timm medmnist huggingface_hub awscli"
+# timm is pinned because no bundle records the timm version, and timm decides
+# what an architecture's pre-logits ARE: the InceptionNeXt zero-width head is a
+# 1.0.x constructor bug, and build_encoder's workaround was verified against
+# 1.0.29 specifically. The DermaMNIST sweep of 2026-09-13 installed 1.0.29 (the
+# latest release then and since); an unpinned install would let two sweeps of
+# the same backbone differ with nothing in either manifest to say so. Keep the
+# Dockerfile's pin identical -- test_run checks.
+PIP_PACKAGES = "timm==1.0.29 medmnist huggingface_hub awscli"
 
 # Deadlines. Every one of these is a window where money burns with nothing to
 # show, so each has an abort rather than an open-ended wait.
-RUNNING_DEADLINE = 10 * 60     # provisioning -> actual_status running
+# provisioning -> actual_status running. 20 min, not 10: "loading" is mostly the
+# host pulling the multi-GB image, and on an uncached host that routinely runs
+# past 10 min. At 10, 10 of 13 boxes lost on 2026-09-13 died here, and the one
+# whose status was logged was mid-pull ("Verifying Checksum ... Download
+# complete") -- killed moments from ready, only to start the same pull on
+# another uncached host. A genuinely wedged box now costs 10 more minutes; a
+# slow one no longer costs a whole retry.
+RUNNING_DEADLINE = 20 * 60
 SSH_DEADLINE = 5 * 60          # running -> sshd answering
 SETUP_TIMEOUT = 8 * 60         # pip install
 DATA_TIMEOUT = 15 * 60         # 3.9 GB pull from S3
@@ -368,17 +391,29 @@ def abort() -> int:
 # ---------------------------------------------------------------------------
 
 def wait_for_running(instance_id: int) -> dict:
+    """Poll until the box is running; on timeout, say what vast last reported.
+
+    ``actual_status`` alone ("loading") cannot tell a slow image pull from a
+    wedged host. vast's ``status_msg`` usually can, and 10 of 13 boxes lost on
+    2026-09-13 died here with nothing recorded but the deadline -- so the
+    message is printed whenever it changes and carried into the error.
+    """
     deadline = time.time() + RUNNING_DEADLINE
+    last_msg = ""
     while time.time() < deadline:
         inst = next((i for i in vast.show_instances()
                      if int(i.get("id", -1)) == instance_id), None)
         status = (inst or {}).get("actual_status")
-        print(f"  status={status}", flush=True)
+        msg = " ".join(str((inst or {}).get("status_msg") or "").split())[:200]
+        print(f"  status={status}" + (f"  [{msg}]" if msg and msg != last_msg else ""),
+              flush=True)
+        last_msg = msg or last_msg
         if status == "running":
             return inst
         time.sleep(15)
     raise RuntimeError(f"instance {instance_id} never reached running in "
-                       f"{RUNNING_DEADLINE // 60} min")
+                       f"{RUNNING_DEADLINE // 60} min; vast last said: "
+                       f"{last_msg or '(nothing)'}")
 
 
 def wait_for_ssh(routes: List[tuple], *, user: str = "root", on_retry=None,

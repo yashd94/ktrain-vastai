@@ -342,6 +342,17 @@ def _check_s3(cfg: ExtractConfig, rep: PreflightReport) -> None:
                 f"key. Use a different S3_FEATURES_PREFIX or match the settings.")
 
 
+def _is_network_error(e: BaseException) -> bool:
+    """A failure to reach the Hub at all, as opposed to the Hub answering 'no'.
+
+    requests' exceptions (ConnectionError, SSLError, Timeout, and the Hub's
+    HTTP errors) all derive from OSError; GatedRepoError and
+    RepositoryNotFoundError are caught before this is consulted.
+    """
+    return isinstance(e, (OSError, TimeoutError)) or type(e).__name__ in {
+        "LocalEntryNotFoundError", "OfflineModeIsEnabled"}
+
+
 def _check_hf(cfg: ExtractConfig, models: Optional[List[dict]],
               rep: PreflightReport, sample: int = 5) -> None:
     token = read_hf_token(cfg)
@@ -358,7 +369,7 @@ def _check_hf(cfg: ExtractConfig, models: Optional[List[dict]],
         return
 
     names = [m["name"] for m in models][:max(1, sample)]
-    gated, unknown = [], []
+    gated, unknown, unreachable = [], [], []
     for name in names:
         try:
             model_info(f"timm/{name}", token=token)
@@ -370,7 +381,21 @@ def _check_hf(cfg: ExtractConfig, models: Optional[List[dict]],
             (unknown if token else gated).append(name)
         except Exception as e:
             unknown.append(f"{name} ({type(e).__name__})")
+            if _is_network_error(e):
+                unreachable.append(f"{type(e).__name__}: "
+                                   f"{' '.join(str(e).split())[:160]}")
 
+    # Every probe failing to CONNECT is not a warning: it is a machine that
+    # cannot download a single weight file. On 2026-09-14 a vast host whose
+    # DNS answered huggingface.co with a Meta IPv6 address passed preflight
+    # on exactly this -- "could not resolve 5 repo(s)" was only a warning --
+    # then failed every model of its shard one TLS error at a time.
+    if names and len(unreachable) == len(names):
+        rep.errors.append(
+            f"cannot reach the HuggingFace Hub from this machine: all "
+            f"{len(names)} probes failed to connect (e.g. {unreachable[0]}). "
+            f"Every weight download would fail; use a machine with working "
+            f"HTTPS to huggingface.co.")
     if gated and not token:
         rep.errors.append(
             f"no HF token, and {len(gated)} of {len(names)} probed repos are "
@@ -386,6 +411,55 @@ def _check_hf(cfg: ExtractConfig, models: Optional[List[dict]],
             f"{', '.join(unknown[:3])}")
 
 
+def cuda_arch_supported(capability, arch_list) -> bool:
+    """Whether a torch build can run kernels on a GPU of this compute capability.
+
+    A cubin built for sm_Mm runs on any sm_Mn with the same major and n >= m --
+    sm_86 code runs on an sm_89 RTX 4060 Ti, which is why those cards work
+    under a torch that lists no sm_89 -- and PTX for compute_Mm can be JIT-
+    compiled for anything at or above it. Nothing else runs. The image's torch
+    2.5.1/cu124 stops at sm_90, so an RTX 5060 Ti (12.0) fails its first CUDA
+    op with "no kernel image is available for execution on the device".
+    """
+    major, minor = capability
+    for arch in arch_list:
+        kind, _, num = str(arch).partition("_")
+        if len(num) < 2 or not num.isdigit():
+            continue
+        a_major, a_minor = int(num[:-1]), int(num[-1])
+        if kind == "sm" and a_major == major and a_minor <= minor:
+            return True
+        if kind == "compute" and (a_major, a_minor) <= (major, minor):
+            return True
+    return False
+
+
+def _check_cuda_arch(rep: PreflightReport) -> None:
+    """On a GPU box, refuse a card this torch build has no kernels for.
+
+    Failing here costs one box, which the driver releases and replaces.
+    Failing later cost a whole shard: on 2026-09-14 a Blackwell box passed
+    every other check, launched, and failed each model in turn. On a laptop
+    there is nothing to judge, so the absence is recorded and nothing more.
+    """
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            rep.facts["cuda"] = "absent"
+            return
+        cap = tuple(torch.cuda.get_device_capability(0))
+        arches = list(torch.cuda.get_arch_list())
+    except Exception as e:
+        rep.facts["cuda"] = f"unprobed ({type(e).__name__})"
+        return
+    rep.facts["cuda_capability"] = f"{cap[0]}.{cap[1]}"
+    if not cuda_arch_supported(cap, arches):
+        rep.errors.append(
+            f"GPU compute capability {cap[0]}.{cap[1]} has no kernels in this "
+            f"torch build (arch list {arches}); every model would fail with 'no "
+            f"kernel image is available'. Rent a card this build supports.")
+
+
 def preflight(cfg: ExtractConfig, *, check_s3: bool = True,
               check_hf: bool = True, hf_sample: int = 5) -> PreflightReport:
     """Validate a config. Structural checks always run; the probing checks
@@ -394,6 +468,7 @@ def preflight(cfg: ExtractConfig, *, check_s3: bool = True,
     _check_structure(cfg, rep)
     models = _check_selection(cfg, rep)
     _check_disk(cfg, rep)
+    _check_cuda_arch(rep)
     if check_s3:
         _check_s3(cfg, rep)
     if check_hf:

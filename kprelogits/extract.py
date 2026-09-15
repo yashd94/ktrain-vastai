@@ -366,7 +366,8 @@ def _run(cfg: ExtractConfig, st) -> int:
         save_atomic(out, bundle_payload(
             feats, data_flag=cfg.data_flag, model_name=name, feat_dim=feat_dim,
             num_classes=num_classes, max_train=cfg.max_train,
-            precision=cfg.precision, weights_revision=M.weights_revision(name)))
+            precision=cfg.precision, weights_revision=M.weights_revision(name),
+            preprocessing=M.preprocessing_spec(int(info.get("n_channels", 3)))))
         del feats
 
         dt = time.perf_counter() - t0

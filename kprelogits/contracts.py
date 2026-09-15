@@ -102,6 +102,12 @@ def validate_prelogit_bundle(npz: Any, *, strict_version: bool = True) -> Prelog
         )
 
     feat_dim = int(npz["feat_dim"])
+    if feat_dim < 1:
+        # Every other check here is a consistency check, and a bundle with no
+        # feature columns is perfectly consistent: x is (n, 0), feat_dim is 0.
+        # Four InceptionNeXt bundles shipped exactly like that.
+        raise ContractError(f"feat_dim={feat_dim}: a bundle with no feature "
+                            f"columns carries nothing to fit on")
     for split in ("train", "val", "test"):
         x, y = npz[f"x_{split}"], npz[f"y_{split}"]
         if x.ndim != 2 or x.shape[1] != feat_dim:

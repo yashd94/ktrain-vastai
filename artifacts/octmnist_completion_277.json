@@ -1,0 +1,1115 @@
+{
+  "schema": 1,
+  "data_flag": "octmnist",
+  "note": "Completion of the 2026-09-13 OCTMNIST re-extraction. That run landed 564 bundles, then aborted when rank 7 exhausted every offer; its teardown destroyed ranks 4 and 6 mid-shard. These are the models of ranks 4, 6 and 7 not yet in S3, excluding the 24 known timm build failures.",
+  "models": [
+    {
+      "name": "beitv2_base_patch16_224.in1k_ft_in22k",
+      "params": 85761984
+    },
+    {
+      "name": "caformer_s18.sail_in1k",
+      "params": 23237936
+    },
+    {
+      "name": "cait_xxs36_224.fb_dist_in1k",
+      "params": 17106720
+    },
+    {
+      "name": "coatnet_0_rw_224.sw_in1k",
+      "params": 26666562
+    },
+    {
+      "name": "coatnet_rmlp_1_rw2_224.sw_in12k_ft_in1k",
+      "params": 40955622
+    },
+    {
+      "name": "convformer_b36.sail_in22k",
+      "params": 94441104
+    },
+    {
+      "name": "convformer_s36.sail_in1k",
+      "params": 36908432
+    },
+    {
+      "name": "convmixer_768_32.in1k",
+      "params": 20341248
+    },
+    {
+      "name": "convnext_femto.d1_in1k",
+      "params": 4832784
+    },
+    {
+      "name": "convnext_femto_ols.d1_in1k",
+      "params": 4841520
+    },
+    {
+      "name": "convnext_nano.in12k_ft_in1k",
+      "params": 14952560
+    },
+    {
+      "name": "convnext_nano_ols.d1h_in1k",
+      "params": 15008560
+    },
+    {
+      "name": "convnext_small.in12k",
+      "params": 49454688
+    },
+    {
+      "name": "convnext_small.in12k_ft_in1k",
+      "params": 49454688
+    },
+    {
+      "name": "convnext_tiny_hnf.a2h_in1k",
+      "params": 27820128
+    },
+    {
+      "name": "convnext_zepto_rms.ra4_e3600_r224_in1k",
+      "params": 1898656
+    },
+    {
+      "name": "convnextv2_femto.fcmae",
+      "params": 4848240
+    },
+    {
+      "name": "convnextv2_femto.fcmae_ft_in1k",
+      "params": 4848240
+    },
+    {
+      "name": "convnextv2_pico.fcmae",
+      "params": 8553280
+    },
+    {
+      "name": "convnextv2_pico.fcmae_ft_in1k",
+      "params": 8553280
+    },
+    {
+      "name": "deit3_base_patch16_224.fb_in1k",
+      "params": 85816320
+    },
+    {
+      "name": "deit3_base_patch16_224.fb_in22k_ft_in1k",
+      "params": 85816320
+    },
+    {
+      "name": "deit_small_patch16_224.fb_in1k",
+      "params": 21665664
+    },
+    {
+      "name": "densenet201.tv_in1k",
+      "params": 18092928
+    },
+    {
+      "name": "densenetblur121d.ra_in1k",
+      "params": 6973088
+    },
+    {
+      "name": "dla46x_c.in1k",
+      "params": 811440
+    },
+    {
+      "name": "dla60.in1k",
+      "params": 21011632
+    },
+    {
+      "name": "dpn131.mx_in1k",
+      "params": 76565504
+    },
+    {
+      "name": "dpn68.mx_in1k",
+      "params": 11778602
+    },
+    {
+      "name": "ecaresnet101d_pruned.miil_in1k",
+      "params": 22833040
+    },
+    {
+      "name": "ecaresnet50d.miil_in1k",
+      "params": 23527350
+    },
+    {
+      "name": "efficientformer_l7.snap_dist_in1k",
+      "params": 82337912
+    },
+    {
+      "name": "efficientformerv2_l.snap_dist_in1k",
+      "params": 26518712
+    },
+    {
+      "name": "efficientnet_es.ra_in1k",
+      "params": 4157392
+    },
+    {
+      "name": "efficientnet_es_pruned.in1k",
+      "params": 4157392
+    },
+    {
+      "name": "efficientvit_l1.r224_in1k",
+      "params": 49453088
+    },
+    {
+      "name": "efficientvit_l2.r224_in1k",
+      "params": 60506016
+    },
+    {
+      "name": "ese_vovnet19b_dw.ra_in1k",
+      "params": 5518080
+    },
+    {
+      "name": "ese_vovnet39b.ra_in1k",
+      "params": 23543936
+    },
+    {
+      "name": "fasternet_s.in1k",
+      "params": 29900032
+    },
+    {
+      "name": "fasternet_t0.in1k",
+      "params": 2624500
+    },
+    {
+      "name": "focalnet_base_srf.ms_in1k",
+      "params": 87123144
+    },
+    {
+      "name": "focalnet_small_lrf.ms_in1k",
+      "params": 49573440
+    },
+    {
+      "name": "gcvit_base.in1k",
+      "params": 89295836
+    },
+    {
+      "name": "gcvit_tiny.in1k",
+      "params": 27708974
+    },
+    {
+      "name": "gcvit_xtiny.in1k",
+      "params": 19468294
+    },
+    {
+      "name": "ghostnetv2_160.in1k",
+      "params": 11111698
+    },
+    {
+      "name": "ghostnetv3_100.in1k",
+      "params": 6848028
+    },
+    {
+      "name": "hardcorenas_d.miil_green_in1k",
+      "params": 6219208
+    },
+    {
+      "name": "hardcorenas_e.miil_green_in1k",
+      "params": 6789992
+    },
+    {
+      "name": "hgnetv2_b0.ssld_stage1_in22k_in1k",
+      "params": 3947550
+    },
+    {
+      "name": "hgnetv2_b0.ssld_stage2_ft_in1k",
+      "params": 3947550
+    },
+    {
+      "name": "hgnetv2_b4.ssld_stage1_in22k_in1k",
+      "params": 17747680
+    },
+    {
+      "name": "hgnetv2_b4.ssld_stage2_ft_in1k",
+      "params": 17747680
+    },
+    {
+      "name": "hiera_base_224.mae",
+      "params": 50755968
+    },
+    {
+      "name": "hiera_base_plus_224.mae",
+      "params": 68999616
+    },
+    {
+      "name": "hiera_base_plus_224.mae_in1k_ft_in1k",
+      "params": 68999616
+    },
+    {
+      "name": "hrnet_w18.ms_aug_in1k",
+      "params": 19250004
+    },
+    {
+      "name": "hrnet_w18_small.gluon_in1k",
+      "params": 11138464
+    },
+    {
+      "name": "hrnet_w18_small.ms_in1k",
+      "params": 11138464
+    },
+    {
+      "name": "hrnet_w32.ms_in1k",
+      "params": 39183680
+    },
+    {
+      "name": "hrnet_w44.ms_in1k",
+      "params": 65015984
+    },
+    {
+      "name": "hrnet_w48.ms_in1k",
+      "params": 75420864
+    },
+    {
+      "name": "inception_next_small.sail_in1k",
+      "params": 47069016
+    },
+    {
+      "name": "lcnet_050.ra2_in1k",
+      "params": 599856
+    },
+    {
+      "name": "lcnet_075.ra2_in1k",
+      "params": 1077288
+    },
+    {
+      "name": "legacy_seresnet18.in1k",
+      "params": 11265592
+    },
+    {
+      "name": "legacy_seresnet50.in1k",
+      "params": 26039024
+    },
+    {
+      "name": "legacy_seresnext101_32x4d.in1k",
+      "params": 46906416
+    },
+    {
+      "name": "levit_192.fb_dist_in1k",
+      "params": 11002445
+    },
+    {
+      "name": "levit_384.fb_dist_in1k",
+      "params": 39235236
+    },
+    {
+      "name": "levit_conv_128.fb_dist_in1k",
+      "params": 9262544
+    },
+    {
+      "name": "mambaout_base.in1k",
+      "params": 81740092
+    },
+    {
+      "name": "mambaout_base_plus_rw.sw_e150_in12k_ft_in1k",
+      "params": 98583552
+    },
+    {
+      "name": "mambaout_base_short_rw.sw_e500_in1k",
+      "params": 85754688
+    },
+    {
+      "name": "mambaout_small.in1k",
+      "params": 46183072
+    },
+    {
+      "name": "mambaout_tiny.in1k",
+      "params": 24240096
+    },
+    {
+      "name": "maxvit_base_tf_224.in1k",
+      "params": 118698708
+    },
+    {
+      "name": "maxvit_small_tf_224.in1k",
+      "params": 68158956
+    },
+    {
+      "name": "maxvit_tiny_tf_224.in1k",
+      "params": 30403528
+    },
+    {
+      "name": "maxxvitv2_rmlp_base_rw_224.sw_in12k",
+      "params": 115067512
+    },
+    {
+      "name": "mixer_b16_224.miil_in21k_ft_in1k",
+      "params": 59111472
+    },
+    {
+      "name": "mixnet_m.ft_in1k",
+      "params": 3477382
+    },
+    {
+      "name": "mixnet_s.ft_in1k",
+      "params": 2597606
+    },
+    {
+      "name": "mobilenetv1_100.ra4_e3600_r224_in1k",
+      "params": 3206976
+    },
+    {
+      "name": "mobilenetv1_125.ra4_e3600_r224_in1k",
+      "params": 4989840
+    },
+    {
+      "name": "mobilenetv2_050.lamb_in1k",
+      "params": 687680
+    },
+    {
+      "name": "mobilenetv3_large_100.miil_in21k",
+      "params": 4202032
+    },
+    {
+      "name": "mobilenetv3_large_100.ra4_e3600_r224_in1k",
+      "params": 4202032
+    },
+    {
+      "name": "mobilenetv3_large_100.ra_in1k",
+      "params": 5507432
+    },
+    {
+      "name": "mobilenetv4_conv_blur_medium.e500_r224_in1k",
+      "params": 8434512
+    },
+    {
+      "name": "mobilenetv4_conv_small.e1200_r224_in1k",
+      "params": 2493024
+    },
+    {
+      "name": "mobilenetv4_conv_small.e2400_r224_in1k",
+      "params": 2493024
+    },
+    {
+      "name": "mobileone_s2.apple_in1k",
+      "params": 5835648
+    },
+    {
+      "name": "mobileone_s4.apple_in1k",
+      "params": 12902248
+    },
+    {
+      "name": "mvitv2_base.fb_in1k",
+      "params": 50703744
+    },
+    {
+      "name": "nest_small_jx.goog_in1k",
+      "params": 37966176
+    },
+    {
+      "name": "nextvit_base.bd_in1k",
+      "params": 43793856
+    },
+    {
+      "name": "nextvit_base.bd_ssld_6m_in1k",
+      "params": 43793856
+    },
+    {
+      "name": "nfnet_l0.ra2_in1k",
+      "params": 32769488
+    },
+    {
+      "name": "poolformer_m48.sail_in1k",
+      "params": 72704448
+    },
+    {
+      "name": "poolformer_s12.sail_in1k",
+      "params": 11402176
+    },
+    {
+      "name": "poolformerv2_s12.sail_in1k",
+      "params": 11378712
+    },
+    {
+      "name": "poolformerv2_s36.sail_in1k",
+      "params": 30278216
+    },
+    {
+      "name": "pvt_v2_b0.in1k",
+      "params": 3409760
+    },
+    {
+      "name": "pvt_v2_b4.in1k",
+      "params": 62043072
+    },
+    {
+      "name": "rdnet_base.nv_in1k",
+      "params": 85690096
+    },
+    {
+      "name": "rdnet_large.nv_in1k",
+      "params": 184268632
+    },
+    {
+      "name": "regnetx_002.pycls_in1k",
+      "params": 2315792
+    },
+    {
+      "name": "regnetx_004_tv.tv2_in1k",
+      "params": 5094976
+    },
+    {
+      "name": "regnetx_006.pycls_in1k",
+      "params": 5667040
+    },
+    {
+      "name": "regnetx_032.pycls_in1k",
+      "params": 14287552
+    },
+    {
+      "name": "regnetx_040.pycls_in1k",
+      "params": 20757248
+    },
+    {
+      "name": "regnetx_064.pycls_in1k",
+      "params": 24584256
+    },
+    {
+      "name": "regnetx_160.tv2_in1k",
+      "params": 52229536
+    },
+    {
+      "name": "regnetx_320.tv2_in1k",
+      "params": 105290560
+    },
+    {
+      "name": "regnety_002.pycls_in1k",
+      "params": 2793996
+    },
+    {
+      "name": "regnety_008_tv.tv2_in1k",
+      "params": 5647512
+    },
+    {
+      "name": "regnety_016.tv2_in1k",
+      "params": 10313430
+    },
+    {
+      "name": "regnety_032.pycls_in1k",
+      "params": 17923338
+    },
+    {
+      "name": "regnety_064.pycls_in1k",
+      "params": 29286252
+    },
+    {
+      "name": "regnety_080.pycls_in1k",
+      "params": 37163068
+    },
+    {
+      "name": "regnety_080.ra3_in1k",
+      "params": 37163068
+    },
+    {
+      "name": "regnety_160.deit_in1k",
+      "params": 80565140
+    },
+    {
+      "name": "regnety_160.pycls_in1k",
+      "params": 80565140
+    },
+    {
+      "name": "regnety_160.sw_in12k",
+      "params": 80565140
+    },
+    {
+      "name": "regnety_320.seer",
+      "params": 141333770
+    },
+    {
+      "name": "regnety_320.tv2_in1k",
+      "params": 141333770
+    },
+    {
+      "name": "regnetz_b16.ra3_in1k",
+      "params": 8178480
+    },
+    {
+      "name": "repghostnet_111.in1k",
+      "params": 3258984
+    },
+    {
+      "name": "repghostnet_150.in1k",
+      "params": 5294336
+    },
+    {
+      "name": "repghostnet_200.in1k",
+      "params": 8515124
+    },
+    {
+      "name": "repvgg_b1.rvgg_in1k",
+      "params": 55366016
+    },
+    {
+      "name": "repvgg_b2.rvgg_in1k",
+      "params": 86461376
+    },
+    {
+      "name": "repvgg_b2g4.rvgg_in1k",
+      "params": 59197376
+    },
+    {
+      "name": "repvit_m1.dist_in1k",
+      "params": 4713712
+    },
+    {
+      "name": "repvit_m1_0.dist_450e_in1k",
+      "params": 6403004
+    },
+    {
+      "name": "repvit_m1_1.dist_300e_in1k",
+      "params": 7774864
+    },
+    {
+      "name": "repvit_m2_3.dist_300e_in1k",
+      "params": 22404232
+    },
+    {
+      "name": "repvit_m3.dist_in1k",
+      "params": 9654784
+    },
+    {
+      "name": "res2net101_26w_4s.in1k",
+      "params": 43157688
+    },
+    {
+      "name": "res2net50_26w_8s.in1k",
+      "params": 46354776
+    },
+    {
+      "name": "res2net50d.in1k",
+      "params": 23669352
+    },
+    {
+      "name": "res2next50.in1k",
+      "params": 22622464
+    },
+    {
+      "name": "resmlp_24_224.fb_distilled_in1k",
+      "params": 29635680
+    },
+    {
+      "name": "resmlp_36_224.fb_distilled_in1k",
+      "params": 44305488
+    },
+    {
+      "name": "resmlp_36_224.fb_in1k",
+      "params": 44305488
+    },
+    {
+      "name": "resnest26d.gluon_in1k",
+      "params": 15020448
+    },
+    {
+      "name": "resnest50d_1s4x24d.in1k",
+      "params": 23628000
+    },
+    {
+      "name": "resnest50d_4s2x40d.in1k",
+      "params": 28368592
+    },
+    {
+      "name": "resnet101.tv_in1k",
+      "params": 42500160
+    },
+    {
+      "name": "resnet101_clip_gap.openai",
+      "params": 42519392
+    },
+    {
+      "name": "resnet152.a1_in1k",
+      "params": 58143808
+    },
+    {
+      "name": "resnet152.a2_in1k",
+      "params": 58143808
+    },
+    {
+      "name": "resnet152.gluon_in1k",
+      "params": 58143808
+    },
+    {
+      "name": "resnet18.a1_in1k",
+      "params": 11176512
+    },
+    {
+      "name": "resnet18.fb_ssl_yfcc100m_ft_in1k",
+      "params": 11176512
+    },
+    {
+      "name": "resnet18.fb_swsl_ig1b_ft_in1k",
+      "params": 11176512
+    },
+    {
+      "name": "resnet26.bt_in1k",
+      "params": 13946176
+    },
+    {
+      "name": "resnet34.a1_in1k",
+      "params": 21284672
+    },
+    {
+      "name": "resnet34.a2_in1k",
+      "params": 21284672
+    },
+    {
+      "name": "resnet34d.ra2_in1k",
+      "params": 21303904
+    },
+    {
+      "name": "resnet50.a2_in1k",
+      "params": 23508032
+    },
+    {
+      "name": "resnet50.am_in1k",
+      "params": 23508032
+    },
+    {
+      "name": "resnet50.c2_in1k",
+      "params": 23508032
+    },
+    {
+      "name": "resnet50.fb_ssl_yfcc100m_ft_in1k",
+      "params": 23508032
+    },
+    {
+      "name": "resnet50.fb_swsl_ig1b_ft_in1k",
+      "params": 23508032
+    },
+    {
+      "name": "resnet50_clip_gap.cc12m",
+      "params": 23527264
+    },
+    {
+      "name": "resnet50d.a1_in1k",
+      "params": 23527264
+    },
+    {
+      "name": "resnet50d.gluon_in1k",
+      "params": 23527264
+    },
+    {
+      "name": "resnet50d.ra2_in1k",
+      "params": 23527264
+    },
+    {
+      "name": "resnetaa50.a1h_in1k",
+      "params": 23508032
+    },
+    {
+      "name": "resnetaa50d.sw_in12k",
+      "params": 23527264
+    },
+    {
+      "name": "resnetaa50d.sw_in12k_ft_in1k",
+      "params": 23527264
+    },
+    {
+      "name": "resnetv2_18d.ra4_e3600_r224_in1k",
+      "params": 11193952
+    },
+    {
+      "name": "resnetv2_34d.ra4_e3600_r224_in1k",
+      "params": 21302112
+    },
+    {
+      "name": "resnetv2_50.a1h_in1k",
+      "params": 23500352
+    },
+    {
+      "name": "resnext101_32x16d.fb_ssl_yfcc100m_ft_in1k",
+      "params": 191977792
+    },
+    {
+      "name": "resnext101_32x16d.fb_wsl_ig1b_ft_in1k",
+      "params": 191977792
+    },
+    {
+      "name": "resnext101_32x4d.fb_ssl_yfcc100m_ft_in1k",
+      "params": 42128704
+    },
+    {
+      "name": "resnext101_32x8d.fb_wsl_ig1b_ft_in1k",
+      "params": 86742336
+    },
+    {
+      "name": "resnext101_64x4d.c1_in1k",
+      "params": 81406272
+    },
+    {
+      "name": "resnext101_64x4d.gluon_in1k",
+      "params": 81406272
+    },
+    {
+      "name": "resnext50_32x4d.fb_ssl_yfcc100m_ft_in1k",
+      "params": 22979904
+    },
+    {
+      "name": "resnext50_32x4d.gluon_in1k",
+      "params": 22979904
+    },
+    {
+      "name": "resnext50_32x4d.ra_in1k",
+      "params": 22979904
+    },
+    {
+      "name": "rexnet_150.nav_in1k",
+      "params": 7807593
+    },
+    {
+      "name": "rexnet_300.nav_in1k",
+      "params": 30867792
+    },
+    {
+      "name": "rexnetr_200.sw_in12k",
+      "params": 13961432
+    },
+    {
+      "name": "selecsls60.in1k",
+      "params": 29389768
+    },
+    {
+      "name": "semnasnet_075.rmsp_in1k",
+      "params": 1631278
+    },
+    {
+      "name": "semnasnet_100.rmsp_in1k",
+      "params": 2606038
+    },
+    {
+      "name": "seresnet50.a1_in1k",
+      "params": 26039024
+    },
+    {
+      "name": "seresnet50.ra2_in1k",
+      "params": 26039024
+    },
+    {
+      "name": "seresnext101_32x4d.gluon_in1k",
+      "params": 46906416
+    },
+    {
+      "name": "seresnext26t_32x4d.bt_in1k",
+      "params": 14757976
+    },
+    {
+      "name": "seresnext50_32x4d.racm_in1k",
+      "params": 25510896
+    },
+    {
+      "name": "seresnextaa101d_32x8d.ah_in1k",
+      "params": 91539280
+    },
+    {
+      "name": "shvit_s3.in1k",
+      "params": 13795377
+    },
+    {
+      "name": "skresnet34.ra_in1k",
+      "params": 21769376
+    },
+    {
+      "name": "skresnext50_32x4d.ra_in1k",
+      "params": 25430784
+    },
+    {
+      "name": "starnet_s4.in1k",
+      "params": 7225728
+    },
+    {
+      "name": "swiftformer_l3.dist_in1k",
+      "params": 27468736
+    },
+    {
+      "name": "swiftformer_s.dist_in1k",
+      "params": 5642128
+    },
+    {
+      "name": "swin_large_patch4_window7_224.ms_in22k",
+      "params": 194995476
+    },
+    {
+      "name": "swin_s3_base_224.ms_in1k",
+      "params": 70356762
+    },
+    {
+      "name": "swin_s3_small_224.ms_in1k",
+      "params": 48968298
+    },
+    {
+      "name": "swin_tiny_patch4_window7_224.ms_in1k",
+      "params": 27519354
+    },
+    {
+      "name": "swin_tiny_patch4_window7_224.ms_in22k_ft_in1k",
+      "params": 27519354
+    },
+    {
+      "name": "swinv2_cr_small_224.sw_in1k",
+      "params": 48926100
+    },
+    {
+      "name": "tf_efficientnet_b0.in1k",
+      "params": 4007548
+    },
+    {
+      "name": "tf_efficientnet_cc_b0_4e.in1k",
+      "params": 12033116
+    },
+    {
+      "name": "tf_efficientnet_cc_b0_8e.in1k",
+      "params": 22732284
+    },
+    {
+      "name": "tf_mixnet_s.in1k",
+      "params": 2597606
+    },
+    {
+      "name": "tf_mobilenetv3_large_100.in1k",
+      "params": 4202032
+    },
+    {
+      "name": "tf_mobilenetv3_large_minimal_100.in1k",
+      "params": 2643288
+    },
+    {
+      "name": "tiny_vit_11m_224.dist_in22k_ft_in1k",
+      "params": 10547972
+    },
+    {
+      "name": "tiny_vit_21m_224.dist_in22k",
+      "params": 20621568
+    },
+    {
+      "name": "tiny_vit_21m_224.dist_in22k_ft_in1k",
+      "params": 20621568
+    },
+    {
+      "name": "tnt_b_patch16_224.in1k",
+      "params": 64787680
+    },
+    {
+      "name": "tnt_s_patch16_224.in1k",
+      "params": 23383584
+    },
+    {
+      "name": "tresnet_l.miil_in1k",
+      "params": 53556256
+    },
+    {
+      "name": "tresnet_v2_l.miil_in21k_ft_in1k",
+      "params": 44125824
+    },
+    {
+      "name": "twins_pcpvt_base.in1k",
+      "params": 43315456
+    },
+    {
+      "name": "twins_pcpvt_large.in1k",
+      "params": 60476672
+    },
+    {
+      "name": "vgg11.tv_in1k",
+      "params": 128766336
+    },
+    {
+      "name": "vgg13.tv_in1k",
+      "params": 128950848
+    },
+    {
+      "name": "vgg13_bn.tv_in1k",
+      "params": 128956736
+    },
+    {
+      "name": "visformer_small.in1k",
+      "params": 39450592
+    },
+    {
+      "name": "vit_base_mci_224.apple_mclip",
+      "params": 85955328
+    },
+    {
+      "name": "vit_base_mci_224.apple_mclip2_dfndr2b",
+      "params": 85955328
+    },
+    {
+      "name": "vit_base_patch16_224.augreg_in21k_ft_in1k",
+      "params": 85798656
+    },
+    {
+      "name": "vit_base_patch16_clip_224.datacompxl",
+      "params": 85799424
+    },
+    {
+      "name": "vit_base_patch16_clip_224.laion2b",
+      "params": 85799424
+    },
+    {
+      "name": "vit_base_patch16_clip_224.laion2b_ft_in12k",
+      "params": 85799424
+    },
+    {
+      "name": "vit_base_patch16_clip_224.metaclip_400m",
+      "params": 85799424
+    },
+    {
+      "name": "vit_base_patch16_clip_224.openai_ft_in12k",
+      "params": 85799424
+    },
+    {
+      "name": "vit_base_patch16_clip_224.openai_ft_in12k_in1k",
+      "params": 85799424
+    },
+    {
+      "name": "vit_base_patch16_rope_224.naver_in1k",
+      "params": 85665792
+    },
+    {
+      "name": "vit_base_patch16_rope_mixed_224.naver_in1k",
+      "params": 85675008
+    },
+    {
+      "name": "vit_base_patch16_rope_mixed_ape_224.naver_in1k",
+      "params": 85825536
+    },
+    {
+      "name": "vit_base_patch16_siglip_gap_224.webli",
+      "params": 85797120
+    },
+    {
+      "name": "vit_base_patch32_224.augreg_in21k",
+      "params": 87455232
+    },
+    {
+      "name": "vit_base_patch32_224.augreg_in21k_ft_in1k",
+      "params": 87455232
+    },
+    {
+      "name": "vit_base_patch32_clip_224.laion2b_ft_in12k_in1k",
+      "params": 87456000
+    },
+    {
+      "name": "vit_base_patch32_clip_224.laion400m_e32",
+      "params": 87456000
+    },
+    {
+      "name": "vit_base_patch32_clip_224.metaclip_2pt5b",
+      "params": 87456000
+    },
+    {
+      "name": "vit_base_patch32_clip_quickgelu_224.metaclip_2pt5b",
+      "params": 87456000
+    },
+    {
+      "name": "vit_base_patch32_clip_quickgelu_224.openai",
+      "params": 87456000
+    },
+    {
+      "name": "vit_base_patch8_224.augreg2_in21k_ft_in1k",
+      "params": 85807872
+    },
+    {
+      "name": "vit_betwixt_patch32_clip_224.tinyclip_laion400m",
+      "params": 61083520
+    },
+    {
+      "name": "vit_medium_patch32_clip_224.tinyclip_laion400m",
+      "params": 39429632
+    },
+    {
+      "name": "vit_pe_core_base_patch16_224.fb",
+      "params": 92886528
+    },
+    {
+      "name": "vit_relpos_medium_patch16_rpn_224.sw_in1k",
+      "params": 38221920
+    },
+    {
+      "name": "vit_small_patch16_224.augreg_in1k",
+      "params": 21665664
+    },
+    {
+      "name": "vit_small_patch16_224.augreg_in21k",
+      "params": 21665664
+    },
+    {
+      "name": "vit_small_patch16_rope_mixed_224.naver_in1k",
+      "params": 21603840
+    },
+    {
+      "name": "vit_small_patch32_224.augreg_in21k",
+      "params": 22493952
+    },
+    {
+      "name": "vit_small_patch32_224.augreg_in21k_ft_in1k",
+      "params": 22493952
+    },
+    {
+      "name": "vit_srelpos_small_patch16_224.sw_in1k",
+      "params": 21588486
+    },
+    {
+      "name": "vit_tiny_patch16_224.augreg_in21k_ft_in1k",
+      "params": 5524416
+    },
+    {
+      "name": "vit_tiny_r_s16_p8_224.augreg_in21k",
+      "params": 6144704
+    },
+    {
+      "name": "vitamin_small_224.datacomp1b_clip",
+      "params": 21877696
+    },
+    {
+      "name": "volo_d1_224.sail_in1k",
+      "params": 25862040
+    },
+    {
+      "name": "volo_d2_224.sail_in1k",
+      "params": 57652336
+    },
+    {
+      "name": "wide_resnet50_2.tv_in1k",
+      "params": 66834240
+    },
+    {
+      "name": "xcit_large_24_p16_224.fb_in1k",
+      "params": 188327136
+    },
+    {
+      "name": "xcit_large_24_p8_224.fb_dist_in1k",
+      "params": 188163648
+    },
+    {
+      "name": "xcit_medium_24_p8_224.fb_in1k",
+      "params": 83810624
+    },
+    {
+      "name": "xcit_nano_12_p16_224.fb_in1k",
+      "params": 2924224
+    },
+    {
+      "name": "xcit_nano_12_p8_224.fb_dist_in1k",
+      "params": 2920016
+    },
+    {
+      "name": "xcit_small_12_p8_224.fb_in1k",
+      "params": 25828032
+    },
+    {
+      "name": "xcit_small_24_p16_224.fb_in1k",
+      "params": 47286384
+    },
+    {
+      "name": "xcit_small_24_p8_224.fb_dist_in1k",
+      "params": 47246112
+    },
+    {
+      "name": "xcit_tiny_12_p8_224.fb_in1k",
+      "params": 6513504
+    },
+    {
+      "name": "xcit_tiny_24_p16_224.fb_in1k",
+      "params": 11923896
+    },
+    {
+      "name": "xcit_tiny_24_p8_224.fb_dist_in1k",
+      "params": 11914128
+    }
+  ]
+}

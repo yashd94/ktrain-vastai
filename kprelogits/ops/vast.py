@@ -614,7 +614,18 @@ def preteardown_check(s3_prefix: str, *, expected_shards: int,
     blockers: List[str] = []
     notes: List[str] = []
 
-    states = state.read_states(s3_prefix)
+    # State files are keyed by rank alone, so a prefix that has seen an earlier
+    # run with a different shard count still holds that run's files -- a
+    # 1-shard refix into the DermaMNIST prefix reported DO NOT DESTROY over
+    # shards 2-7 of a finished 8-shard run. They are not this run's, and must
+    # neither block nor clear its teardown.
+    all_states = state.read_states(s3_prefix)
+    states = {r: st for r, st in all_states.items()
+              if r < expected_shards
+              and getattr(st, "shards", expected_shards) in (None, expected_shards)}
+    if len(states) < len(all_states):
+        notes.append(f"ignored {len(all_states) - len(states)} state file(s) "
+                     f"from a run with a different shard count")
     missing = [r for r in range(expected_shards) if r not in states]
     if missing:
         blockers.append(f"no published state for shard(s) {missing}")

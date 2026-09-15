@@ -131,18 +131,43 @@ aws s3 cp s3://.../medmnist/octmnist_224.npz /workspace/data/octmnist_224.npz
 
 ### Getting onto the box
 
-There is **one automated path, and it runs a single backbone**:
-`python -m kprelogits.ops.smoke --go` (below). It rents, stages code and
-credentials, launches, polls S3 state, validates, and tears down.
+Two drivers, both of which rent, stage code and credentials, launch, poll S3
+state files, and tear down. Neither needs anything typed on the box.
 
-For a multi-shard sweep there is **no driver yet** — `ops/vast.py` has every
-piece (`search_offers`, `create`, `attach_ssh_key`, `ssh_endpoints`,
-`stage_credentials`, `teardown`, `preteardown_check`) and `smoke.py` composes
-them for one box, but nothing fans that out over N shards and waits on all of
-them. Generalising `smoke.py` is the next piece of work; until then a sweep
-means driving `smoke.py`'s sequence by hand per shard, with
-`preteardown_check(prefix, expected_shards=N, expected_bundles=M)` as the gate
-before destroying anything.
+`ops/smoke.py` runs **one backbone on one box** and validates the result
+against its predecessor in S3. It is the acceptance test for the GPU path, not
+a way to get work done.
+
+`ops/run.py` runs **a model list across N boxes** — the sweep driver:
+
+```bash
+# plan: prints the shard split, the offers, the exact remote commands. Rents nothing.
+python -m kprelogits.ops.run --selection artifacts/dermamnist_pilot50.json \
+    --data-flag dermamnist --shards 4
+
+# same command, with hardware
+python -m kprelogits.ops.run --selection artifacts/dermamnist_pilot50.json \
+    --data-flag dermamnist --shards 4 --go
+
+# post-mortem: destroy anything labelled run-*
+python -m kprelogits.ops.run --abort
+```
+
+Default is plan mode; `--go` is what spends money. Models are split
+round-robin (`select_model_shard`) rather than in blocks, because the
+selection is name-sorted and names correlate with size — blocks would pile the
+heavy backbones onto one box.
+
+Two properties worth knowing, because they are what make it safe to leave
+running. **Every instance id is in the teardown list before it can fail** — the
+context is entered before the first rental and holds a mutable list, so a
+Ctrl-C during provisioning cannot strand a box. And **each box is destroyed as
+its own shard lands**, gated not on the shard's `done` claim but on that
+shard's bundles being present in S3 by name, which the driver checks by
+recomputing the worker's own partition locally.
+
+Re-running the same command after a partial run extracts only what is missing:
+the worker's resume oracle is S3, so bundles that landed are not recomputed.
 
 ### Restamping what is already there
 
@@ -157,7 +182,10 @@ python -m kprelogits.restamp --dir ./bundles --data-flag octmnist
 aws s3 sync ./bundles/ s3://.../medmnist_prelogits/octmnist/
 ```
 
-That is ~5 GB down and up. Restamping does not invent provenance — it records
+That is **~88 GB each way** for the 841 OCTMNIST bundles (measured
+2026-09-13) -- about $8 of S3 egress to a laptop, and more free disk than
+most laptops have, so run it in batches or from a machine in us-east-1, where
+the transfer is free. Restamping does not invent provenance — it records
 `weights_revision="unknown:pre-contract"`, which documents the absence rather
 than papering over it. Re-extracting is the only way to *earn* real
 provenance; see Status for what one such comparison found.
@@ -187,11 +215,14 @@ host can read them out of `ps`, and baking them into a layer would outlive the
 run. A missing secrets file is not fatal — preflight reports what is actually
 missing with far more context.
 
-`timm` is deliberately unpinned, as it was in the legacy image. A timm upgrade
-can change which weights a given `model_name` resolves to; every bundle records
-that identity in `weights_revision`, so bundles from two timm versions stay
-*distinguishable* — but they are not interchangeable, so pin before a run that
-has to match an earlier one.
+`timm` is **pinned to 1.0.29**, identically in the Dockerfile and in
+`PIP_PACKAGES` (`kprelogits/ops/smoke.py`), which is what rented boxes install;
+a test fails if the two disagree. `weights_revision` records the HF weights
+commit, not the timm version, and timm decides what a model's pre-logits *are*:
+InceptionNeXt's headless constructor returned zero-width features in timm
+1.0.x, and `build_encoder`'s workaround is verified against 1.0.29. Two sweeps
+under different timm versions could differ with nothing in either manifest to
+say so. Change the pin deliberately, in both places, and re-verify when you do.
 
 ## Testing
 
