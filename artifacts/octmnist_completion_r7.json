@@ -1,0 +1,139 @@
+{
+  "schema": 1,
+  "data_flag": "octmnist",
+  "note": "Rank 7 of the 2026-09-14 OCTMNIST completion run, re-run: its host's DNS sent huggingface.co to a Meta IPv6 address, TLS refused every download, and the shard failed 33 of 34 models.",
+  "models": [
+    {
+      "name": "convmixer_768_32.in1k",
+      "params": 20341248
+    },
+    {
+      "name": "convnext_zepto_rms.ra4_e3600_r224_in1k",
+      "params": 1898656
+    },
+    {
+      "name": "densenet201.tv_in1k",
+      "params": 18092928
+    },
+    {
+      "name": "efficientformer_l7.snap_dist_in1k",
+      "params": 82337912
+    },
+    {
+      "name": "fasternet_s.in1k",
+      "params": 29900032
+    },
+    {
+      "name": "ghostnetv3_100.in1k",
+      "params": 6848028
+    },
+    {
+      "name": "hiera_base_plus_224.mae",
+      "params": 68999616
+    },
+    {
+      "name": "inception_next_small.sail_in1k",
+      "params": 47069016
+    },
+    {
+      "name": "levit_conv_128.fb_dist_in1k",
+      "params": 9262544
+    },
+    {
+      "name": "mobilenetv3_large_100.miil_in21k",
+      "params": 4202032
+    },
+    {
+      "name": "mvitv2_base.fb_in1k",
+      "params": 50703744
+    },
+    {
+      "name": "poolformerv2_s36.sail_in1k",
+      "params": 30278216
+    },
+    {
+      "name": "regnetx_032.pycls_in1k",
+      "params": 14287552
+    },
+    {
+      "name": "regnety_032.pycls_in1k",
+      "params": 17923338
+    },
+    {
+      "name": "regnety_320.tv2_in1k",
+      "params": 141333770
+    },
+    {
+      "name": "repvit_m1.dist_in1k",
+      "params": 4713712
+    },
+    {
+      "name": "res2next50.in1k",
+      "params": 22622464
+    },
+    {
+      "name": "resnet101_clip_gap.openai",
+      "params": 42519392
+    },
+    {
+      "name": "resnet34.a1_in1k",
+      "params": 21284672
+    },
+    {
+      "name": "resnet50_clip_gap.cc12m",
+      "params": 23527264
+    },
+    {
+      "name": "resnetv2_34d.ra4_e3600_r224_in1k",
+      "params": 21302112
+    },
+    {
+      "name": "resnext50_32x4d.fb_ssl_yfcc100m_ft_in1k",
+      "params": 22979904
+    },
+    {
+      "name": "semnasnet_100.rmsp_in1k",
+      "params": 2606038
+    },
+    {
+      "name": "skresnet34.ra_in1k",
+      "params": 21769376
+    },
+    {
+      "name": "swin_tiny_patch4_window7_224.ms_in1k",
+      "params": 27519354
+    },
+    {
+      "name": "tf_mobilenetv3_large_minimal_100.in1k",
+      "params": 2643288
+    },
+    {
+      "name": "twins_pcpvt_base.in1k",
+      "params": 43315456
+    },
+    {
+      "name": "vit_base_patch16_224.augreg_in21k_ft_in1k",
+      "params": 85798656
+    },
+    {
+      "name": "vit_base_patch16_rope_mixed_224.naver_in1k",
+      "params": 85675008
+    },
+    {
+      "name": "vit_base_patch32_clip_quickgelu_224.metaclip_2pt5b",
+      "params": 87456000
+    },
+    {
+      "name": "vit_small_patch16_224.augreg_in21k",
+      "params": 21665664
+    },
+    {
+      "name": "volo_d1_224.sail_in1k",
+      "params": 25862040
+    },
+    {
+      "name": "xcit_small_12_p8_224.fb_in1k",
+      "params": 25828032
+    }
+  ]
+}

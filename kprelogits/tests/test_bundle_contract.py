@@ -31,7 +31,7 @@ from kprelogits.contracts import (  # noqa: E402
 from kprelogits.extract import (  # noqa: E402
     bundle_key, bundle_payload, bundle_status, partition_scheduled, save_atomic,
 )
-from kprelogits.models import PREPROCESSING_SPEC  # noqa: E402
+from kprelogits.models import PREPROCESSING_SPEC, preprocessing_spec  # noqa: E402
 from kprelogits.restamp import UNKNOWN_WEIGHTS, restamp_file  # noqa: E402
 
 D, K = 8, 4
@@ -118,6 +118,31 @@ def test_declared_feat_dim_must_match_the_arrays(tmp_path):
     with np.load(p, allow_pickle=False) as z:
         with pytest.raises(ContractError, match="inconsistent with feat_dim"):
             validate_prelogit_bundle(z)
+
+
+# ---- the preprocessing claim ----------------------------------------------
+
+def test_grayscale_spec_is_frozen():
+    """Every bundle in S3 was written with this exact string. Changing it would
+    make already-extracted octmnist features look like a different pipeline."""
+    assert preprocessing_spec(1) == "resize224x224|gray2rgb|totensor|imagenet_norm"
+    assert PREPROCESSING_SPEC == preprocessing_spec(1)
+
+
+def test_rgb_spec_does_not_claim_a_step_that_never_ran():
+    """image_transform expands grayscale to RGB only when n_channels == 1.
+    dermamnist is 3-channel, so a bundle claiming gray2rgb would be asserting
+    a transform the loader provably skipped -- and nothing downstream checks
+    the string against the pipeline, so it would never be caught."""
+    assert preprocessing_spec(3) == "resize224x224|totensor|imagenet_norm"
+    assert "gray2rgb" not in preprocessing_spec(3)
+
+
+def test_channel_counts_give_different_specs():
+    """The two feature sets are not interchangeable; the manifest must say so."""
+    assert preprocessing_spec(1) != preprocessing_spec(3)
+    assert _key(preprocessing=preprocessing_spec(1)) != \
+        _key(preprocessing=preprocessing_spec(3))
 
 
 # ---- bundle_key -----------------------------------------------------------

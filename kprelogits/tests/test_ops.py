@@ -438,6 +438,36 @@ def test_bundles_missing_from_s3_block_teardown(monkeypatch):
     assert "DO NOT DESTROY" in chk.render()
 
 
+def _stale(rank, shards=8):
+    """A finished-but-incomplete shard left behind by an earlier, wider run."""
+    return state.ShardState(data_flag="octmnist", rank=rank, shards=shards,
+                            phase="done", scheduled=108, extracted=99, uploaded=99,
+                            failed=2)
+
+
+def test_state_files_from_a_wider_earlier_run_do_not_block(monkeypatch):
+    """State files are keyed by rank alone. A 1-shard refix into a prefix that
+    once held an 8-shard run reported DO NOT DESTROY over shards 2-7 -- files
+    that were not its own."""
+    from kprelogits.ops import s3
+    monkeypatch.setattr(state, "read_states",
+                        lambda prefix: {0: _done_state(0), 2: _stale(2), 5: _stale(5)})
+    monkeypatch.setattr(s3, "list_names", lambda *a, **k: {"a_features.npz", "b_features.npz"})
+    chk = vast.preteardown_check("s3://b/p", expected_shards=1, expected_bundles=2)
+    assert chk.ok, chk.render()
+    assert any("ignored 2 state file(s)" in n for n in chk.notes)
+
+
+def test_a_foreign_file_at_our_own_rank_is_not_our_state(monkeypatch):
+    """If only an older run's file sits at rank 0, this run's rank 0 has
+    published nothing -- which must block, not borrow the stale 'done'."""
+    from kprelogits.ops import s3
+    monkeypatch.setattr(state, "read_states", lambda prefix: {0: _stale(0)})
+    monkeypatch.setattr(s3, "list_names", lambda *a, **k: set())
+    chk = vast.preteardown_check("s3://b/p", expected_shards=1)
+    assert not chk.ok and any("no published state" in b for b in chk.blockers)
+
+
 # ---------------------------------------------------------------------------
 # Selection
 # ---------------------------------------------------------------------------

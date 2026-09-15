@@ -98,6 +98,13 @@ only on a box about to be destroyed.
 costs re-extraction at worst); writes raise (a silent upload failure throws away
 a GPU pass).
 
+`ops/run.py` — the sweep driver: rents N boxes, launches one shard on each,
+releases each box as its own shard's bundles appear in S3, and tears down the
+rest in `finally`. The teardown list is entered before the first rental and
+mutated as boxes come and go, so there is no window in which a live instance
+is unaccounted for. `ops/smoke.py` is the same shape for one backbone on one
+box, and exists to test the GPU path rather than to do work.
+
 ## Credentials
 
 **Never put a secret in a command line.** Vast hosts are shared and `ps` is

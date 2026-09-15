@@ -27,14 +27,16 @@ WORKDIR /workspace
 # torch and torchvision come from the base image. These are the rest of what
 # kprelogits imports -- nothing else, verified against its actual import set.
 #
-# Deliberately unpinned, as the legacy image was. Worth knowing: a timm upgrade
-# can change which weights a given model_name resolves to, and that identity is
-# what `weights_revision` records in every bundle. Bundles from two different
-# timm versions are distinguishable after the fact, which is the point of
-# recording it -- but they are not interchangeable, so pin here before a run
-# that has to match an earlier one.
+# timm is pinned, identically to PIP_PACKAGES in kprelogits/ops/smoke.py (a
+# test checks they agree). `weights_revision` records the HF weights commit,
+# NOT the timm version -- and timm decides what a model's pre-logits are: the
+# InceptionNeXt zero-width head was a timm 1.0.x constructor bug, and
+# build_encoder's workaround is verified against 1.0.29 specifically. Two
+# sweeps under different timm versions can differ with nothing in either
+# manifest to say so. Change the pin deliberately, in both places, and
+# re-verify build_encoder when you do.
 RUN pip install --upgrade pip && \
-    pip install timm medmnist huggingface_hub
+    pip install timm==1.0.29 medmnist huggingface_hub
 
 # Defaults in ExtractConfig already point here; created so a run with no
 # volumes mounted still works.

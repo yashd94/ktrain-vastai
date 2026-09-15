@@ -1,0 +1,262 @@
+{
+  "schema": 1,
+  "data_flag": "dermamnist",
+  "n": 50,
+  "inherited_from": "legacy/artifacts/pilot_backbones.json",
+  "inherited_note": "NOT an independent draw. These are the same 50 backbones drawn against OCTMNIST's universe (seed 42, 588 candidates <=50M params, name-sorted). Reused verbatim so the two datasets are a paired comparison over one set of backbones; re-drawing for dermamnist would have made them unpaired.",
+  "source_seed": 42,
+  "source_universe_size": 588,
+  "source_max_params": 50000000,
+  "models": [
+    {
+      "name": "convnext_atto_ols.a2_in1k",
+      "params": 3381912,
+      "backbone_index": 65
+    },
+    {
+      "name": "convnext_nano.d1h_in1k",
+      "params": 14952560,
+      "backbone_index": 76
+    },
+    {
+      "name": "convnext_small.fb_in1k",
+      "params": 49454688,
+      "backbone_index": 83
+    },
+    {
+      "name": "convnext_small.fb_in22k_ft_in1k",
+      "params": 49454688,
+      "backbone_index": 85
+    },
+    {
+      "name": "convnext_tiny.dinov3_lvd1689m",
+      "params": 27820128,
+      "backbone_index": 88
+    },
+    {
+      "name": "convnext_tiny.fb_in1k",
+      "params": 27820128,
+      "backbone_index": 89
+    },
+    {
+      "name": "convnextv2_tiny.fcmae_ft_in22k_in1k",
+      "params": 27866496,
+      "backbone_index": 114
+    },
+    {
+      "name": "dla60x.in1k",
+      "params": 16327344,
+      "backbone_index": 146
+    },
+    {
+      "name": "ecaresnet101d.miil_in1k",
+      "params": 42519563,
+      "backbone_index": 157
+    },
+    {
+      "name": "efficientformer_l3.snap_dist_in1k",
+      "params": 31474036,
+      "backbone_index": 165
+    },
+    {
+      "name": "efficientvit_m2.r224_in1k",
+      "params": 3962106,
+      "backbone_index": 186
+    },
+    {
+      "name": "gmixer_24_224.ra3_in1k",
+      "params": 24336096,
+      "backbone_index": 224
+    },
+    {
+      "name": "legacy_seresnet50.in1k",
+      "params": 26039024,
+      "backbone_index": 286
+    },
+    {
+      "name": "legacy_seresnext101_32x4d.in1k",
+      "params": 46906416,
+      "backbone_index": 287
+    },
+    {
+      "name": "mixnet_l.ft_in1k",
+      "params": 5792252,
+      "backbone_index": 325
+    },
+    {
+      "name": "mobilenetv1_100h.ra4_e3600_r224_in1k",
+      "params": 4257600,
+      "backbone_index": 333
+    },
+    {
+      "name": "mobilenetv2_050.lamb_in1k",
+      "params": 687680,
+      "backbone_index": 335
+    },
+    {
+      "name": "mobilenetv4_conv_medium.e500_r224_in1k",
+      "params": 8434512,
+      "backbone_index": 349
+    },
+    {
+      "name": "mobileone_s0.apple_in1k",
+      "params": 4268272,
+      "backbone_index": 354
+    },
+    {
+      "name": "mobileone_s4.apple_in1k",
+      "params": 12902248,
+      "backbone_index": 358
+    },
+    {
+      "name": "pvt_v2_b2_li.in1k",
+      "params": 22040512,
+      "backbone_index": 394
+    },
+    {
+      "name": "regnetv_064.ra3_in1k",
+      "params": 29279052,
+      "backbone_index": 403
+    },
+    {
+      "name": "regnetx_008.pycls_in1k",
+      "params": 6586656,
+      "backbone_index": 408
+    },
+    {
+      "name": "regnety_032.ra_in1k",
+      "params": 17923338,
+      "backbone_index": 432
+    },
+    {
+      "name": "regnety_080_tv.tv2_in1k",
+      "params": 37364472,
+      "backbone_index": 440
+    },
+    {
+      "name": "res2net50_48w_2s.in1k",
+      "params": 23238304,
+      "backbone_index": 493
+    },
+    {
+      "name": "resmlp_36_224.fb_distilled_in1k",
+      "params": 44305488,
+      "backbone_index": 502
+    },
+    {
+      "name": "resnest14d.gluon_in1k",
+      "params": 8562688,
+      "backbone_index": 507
+    },
+    {
+      "name": "resnet18.a1_in1k",
+      "params": 11176512,
+      "backbone_index": 532
+    },
+    {
+      "name": "resnet34d.ra2_in1k",
+      "params": 21303904,
+      "backbone_index": 548
+    },
+    {
+      "name": "resnet50.a1_in1k",
+      "params": 23508032,
+      "backbone_index": 549
+    },
+    {
+      "name": "resnet50.d_in1k",
+      "params": 23508032,
+      "backbone_index": 557
+    },
+    {
+      "name": "resnet50.fb_swsl_ig1b_ft_in1k",
+      "params": 23508032,
+      "backbone_index": 559
+    },
+    {
+      "name": "resnet50d.a1_in1k",
+      "params": 23527264,
+      "backbone_index": 572
+    },
+    {
+      "name": "resnet50d.ra2_in1k",
+      "params": 23527264,
+      "backbone_index": 575
+    },
+    {
+      "name": "resnetv2_34d.ra4_e3600_r224_in1k",
+      "params": 21302112,
+      "backbone_index": 590
+    },
+    {
+      "name": "resnetv2_50x1_bit.goog_distilled_in1k",
+      "params": 23500352,
+      "backbone_index": 594
+    },
+    {
+      "name": "resnetv2_50x1_bit.goog_in21k",
+      "params": 23500352,
+      "backbone_index": 595
+    },
+    {
+      "name": "rexnet_300.nav_in1k",
+      "params": 30867792,
+      "backbone_index": 622
+    },
+    {
+      "name": "semnasnet_075.rmsp_in1k",
+      "params": 1631278,
+      "backbone_index": 630
+    },
+    {
+      "name": "sequencer2d_m.in1k",
+      "params": 37922688,
+      "backbone_index": 634
+    },
+    {
+      "name": "seresnext50_32x4d.racm_in1k",
+      "params": 25510896,
+      "backbone_index": 646
+    },
+    {
+      "name": "swin_s3_tiny_224.ms_in1k",
+      "params": 27559674,
+      "backbone_index": 672
+    },
+    {
+      "name": "tf_efficientnet_cc_b0_8e.in1k",
+      "params": 22732284,
+      "backbone_index": 687
+    },
+    {
+      "name": "tiny_vit_11m_224.dist_in22k",
+      "params": 10547972,
+      "backbone_index": 699
+    },
+    {
+      "name": "tiny_vit_21m_224.dist_in22k",
+      "params": 20621568,
+      "backbone_index": 702
+    },
+    {
+      "name": "twins_pcpvt_base.in1k",
+      "params": 43315456,
+      "backbone_index": 718
+    },
+    {
+      "name": "vit_small_r26_s32_224.augreg_in21k",
+      "params": 36046912,
+      "backbone_index": 817
+    },
+    {
+      "name": "vitamin_small_224.datacomp1b_clip_ltt",
+      "params": 21877696,
+      "backbone_index": 829
+    },
+    {
+      "name": "volo_d1_224.sail_in1k",
+      "params": 25862040,
+      "backbone_index": 830
+    }
+  ]
+}

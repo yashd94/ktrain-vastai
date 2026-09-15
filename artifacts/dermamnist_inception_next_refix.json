@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "data_flag": "dermamnist",
+  "note": "Re-extraction of the 4 InceptionNeXt backbones whose 2026-09-13 DermaMNIST bundles were zero-width (timm 1.0.x MlpClassifierHead built Linear(hidden, 0) for num_classes=0). Fixed in build_encoder, commit 9f2992c; the empty bundles were deleted from S3 first, since the resume oracle checks names, not content.",
+  "models": [
+    {
+      "name": "inception_next_atto.sail_in1k",
+      "params": 3195520
+    },
+    {
+      "name": "inception_next_base.sail_in1k",
+      "params": 83599136
+    },
+    {
+      "name": "inception_next_small.sail_in1k",
+      "params": 47069016
+    },
+    {
+      "name": "inception_next_tiny.sail_in1k",
+      "params": 25750680
+    }
+  ]
+}

@@ -32,10 +32,30 @@ import time
 import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-# The preprocessing string stamped into every bundle. Changing ANY of the
-# transform below must change this string, or two incompatible feature sets
-# become indistinguishable after the fact.
-PREPROCESSING_SPEC = "resize224x224|gray2rgb|totensor|imagenet_norm"
+# The preprocessing string stamped into every bundle. Changing ANY step of the
+# transform must change this string, or two incompatible feature sets become
+# indistinguishable after the fact.
+def preprocessing_spec(n_channels: int) -> str:
+    """The spec string for one input channel count; mirrors ``image_transform``.
+
+    A constant cannot do this job. ``image_transform`` inserts the grayscale
+    expansion only for 1-channel datasets, so a fixed string stamps ``gray2rgb``
+    onto RGB sets that never ran it -- and nothing downstream would catch it:
+    ``validate_prelogit_bundle`` only checks the field is present, and
+    ``bundle_key`` already separates datasets by ``data_flag``, so there is no
+    collision to trip over. Just fifty manifests making an unfalsifiable claim.
+    """
+    steps = ["resize224x224"]
+    if n_channels == 1:
+        steps.append("gray2rgb")
+    steps += ["totensor", "imagenet_norm"]
+    return "|".join(steps)
+
+
+# The 1-channel string, byte-identical to what has been stamped since the first
+# bundle. Every MedMNIST set extracted before dermamnist was grayscale, so this
+# is what is in S3 and what ``restamp`` goes on asserting for legacy bundles.
+PREPROCESSING_SPEC = preprocessing_spec(1)
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -150,7 +170,57 @@ def build_encoder(model_name: str, device):
 
     with torch.inference_mode():
         feat_dim = encoder(torch.zeros(1, *INPUT_SIZE, device=device)).shape[-1]
+    if feat_dim == 0:
+        # timm's MlpClassifierHead (InceptionNeXt / MetaNeXt, timm 1.0.x)
+        # builds ``fc2 = Linear(hidden, num_classes)`` in __init__ even when
+        # num_classes=0, so the "headless" model emits zero-width output; its
+        # reset() handles 0 correctly and leaves the pre-logits (pool -> fc1 ->
+        # act -> norm, the classifier's input). Reset ONLY here: a model that
+        # already yields features is left exactly as it was built, so bundles
+        # extracted before this fix stay comparable to bundles extracted after.
+        encoder.reset_classifier(0)
+        encoder.eval().to(device)
+        with torch.inference_mode():
+            feat_dim = encoder(torch.zeros(1, *INPUT_SIZE, device=device)).shape[-1]
+    if feat_dim < 1:
+        # A zero-width bundle passes every downstream check -- its arrays
+        # agree with feat_dim=0 -- so this is the last place it can be caught.
+        raise RuntimeError(f"{model_name}: encoder yields zero-width features "
+                           f"even after reset_classifier(0)")
     return encoder, int(feat_dim)
+
+
+def cached_hf_sha(hf_id: str) -> Optional[str]:
+    """The commit this machine actually loaded for ``hf_id``, from the HF cache.
+
+    ``hf_hub_download`` records the resolved commit in ``refs/<revision>``
+    beside the snapshot it wrote. Reading that beats asking the Hub API on both
+    counts that matter. It is what was *loaded*, not what the Hub says is
+    current -- a push between the download and the question would otherwise
+    stamp weights nobody used. And it costs no request: across hundreds of
+    backbones on several boxes, the per-model metadata call is what an
+    anonymous rate limit bites first.
+
+    A timm ``hf_hub_id`` may carry ``@revision``; a full sha there is returned
+    as-is, a branch or tag is looked up under its own ref.
+    """
+    import os
+    import re
+    from pathlib import Path
+
+    repo, _, rev = hf_id.partition("@")
+    if re.fullmatch(r"[0-9a-f]{40}", rev):
+        return rev
+    hub = os.environ.get("HF_HUB_CACHE") or os.path.join(
+        os.environ.get("HF_HOME")
+        or os.path.join(os.path.expanduser("~"), ".cache", "huggingface"),
+        "hub")
+    ref = Path(hub) / f"models--{repo.replace('/', '--')}" / "refs" / (rev or "main")
+    try:
+        sha = ref.read_text().strip()
+    except OSError:
+        return None
+    return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else None
 
 
 def weights_revision(model_name: str) -> str:
@@ -158,9 +228,15 @@ def weights_revision(model_name: str) -> str:
 
     The model name alone is not enough: timm re-points a name at new weights,
     and two bundles extracted months apart under one name would otherwise be
-    indistinguishable. Resolves to the Hub repo plus its commit sha when the
-    network allows, degrading to the repo id, then the config's URL, then
-    ``unknown`` -- each step still more specific than the name.
+    indistinguishable. Resolves to the Hub repo plus its commit sha, degrading
+    to the repo id, then the config's URL, then ``unknown`` -- each step still
+    more specific than the name.
+
+    The sha comes from the local cache first (see ``cached_hf_sha``) and the
+    Hub API only if that fails. Call it after the weights are loaded and before
+    ``drop_hf_weights`` clears them -- extract does. A degraded result is
+    printed, not swallowed: an unpinned revision is exactly as valid-looking in
+    a manifest as a pinned one, so the log line is the only trace it leaves.
     """
     try:
         import timm
@@ -171,14 +247,18 @@ def weights_revision(model_name: str) -> str:
     hf_id = getattr(cfg, "hf_hub_id", None)
     tag = getattr(cfg, "tag", None)
     if hf_id:
-        try:
-            from huggingface_hub import model_info
-            sha = getattr(model_info(hf_id), "sha", None)
-            if sha:
-                return f"hf:{hf_id}@{sha[:12]}"
-        except Exception:
-            pass
-        return f"hf:{hf_id}" + (f"#{tag}" if tag else "")
+        repo = hf_id.partition("@")[0]
+        sha = cached_hf_sha(hf_id)
+        if sha is None:
+            try:
+                from huggingface_hub import model_info
+                sha = getattr(model_info(repo), "sha", None)
+            except Exception as e:
+                print(f"    WARNING weights_revision unpinned for {model_name}: "
+                      f"{type(e).__name__}: {str(e)[:160]}", flush=True)
+        if sha:
+            return f"hf:{repo}@{sha[:12]}"
+        return f"hf:{repo}" + (f"#{tag}" if tag else "")
     url = getattr(cfg, "url", None)
     return f"url:{url}" if url else "unknown"
 
