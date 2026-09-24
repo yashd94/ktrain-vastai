@@ -29,12 +29,14 @@ list is not uniform and shards finish minutes to an hour apart; a box that has
 uploaded its last bundle is pure burn. Early release is gated on the same
 evidence as the final check: that shard's *own* bundles, listed in S3 by name.
 
-**Each box is staged and launched before the next is rented, and finished
-shards are released during acquisition rather than after it.** Renting eight
-boxes serially takes the better part of an hour once a couple fail to boot,
-which is long enough for the first shard to finish inside that window --
-so watching only after the last box launches means paying for every early
-finisher to idle until the slowest rental completes.
+**Every rank rents, stages and launches concurrently, and finished shards are
+released during acquisition rather than after it.** Renting boxes one after
+another made the last rental set the finish time -- eight boxes took the
+better part of an hour once a couple failed to boot -- so each rank now does
+it on its own thread (``launch_all``), from a shared ``OfferPool``. The
+threads only rent and stage; watching and releasing stay on the main thread,
+which is also the only one that receives Ctrl-C. It stops the threads
+through an Event before the teardown runs.
 
 Usage::
 
@@ -51,15 +53,17 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import s3, state, vast
 from .smoke import (  # see the module docstring on why these come from here
     DATA_TIMEOUT, IMAGE, OFFER_QUERY, PIP_PACKAGES, REMOTE_PATH, SETUP_TIMEOUT,
-    SOURCE_SECRETS, _sh, _ssh, aws_credentials, code_tarball, tail_remote_log,
-    wait_for_running, wait_for_ssh,
+    SOURCE_SECRETS, Stopped, _sh, _ssh, aws_credentials, check_stop,
+    code_tarball, tail_remote_log, wait_for_running, wait_for_ssh,
 )
 
 BUCKET = "pandora-linear-probe-inputs-939723541836-us-east-1-an"
@@ -76,6 +80,10 @@ PREFIX = "medmnist_prelogits"
 DISK_GB = 45
 assert DISK_GB < 50, "OFFER_QUERY filters disk_space>=50; keep DISK_GB below it"
 
+# The production bundles' train subsample. ``--max-train 0`` extracts the full
+# split instead, which must go to its own ``--prefix``: bundle names do not
+# encode max_train, so the two would collide (main() refuses, and so would the
+# worker's preflight, against the configs published in the production prefix).
 MAX_TRAIN = 10_000
 
 # Where the selection lands on the box. A constant, and used by BOTH the scp
@@ -92,7 +100,14 @@ REMOTE_TARBALL = "/workspace/kprelogits.tgz"
 # OOM would fail the same large models on every shard at once. 16 GB is
 # plentiful on the marketplace (64 offers at the time of writing) and costs
 # about $0.02/hr more.
-RUN_OFFER_QUERY = OFFER_QUERY.replace("gpu_ram>=8", "gpu_ram>=16")
+#
+# cpu_ram>=32 (GB in the query language; the offer JSON reports MB): the worker
+# holds the whole decoded train split in host RAM -- 4.9 GB for OCTMNIST at 224
+# -- and a full-split extraction then accumulates up to ~1.6 GB of features at
+# feat_dim 4096, copied at least twice on the way to disk. 8 of 64 16 GB-VRAM
+# offers had only 16 GB of RAM on 2026-09-24; the floor cost ~$0.025/hr.
+RUN_OFFER_QUERY = (OFFER_QUERY.replace("gpu_ram>=8", "gpu_ram>=16")
+                   + " cpu_ram>=32")
 
 # Deadlines, sized for a shard of ~100 backbones rather than smoke's one.
 FIRST_STATE_DEADLINE = 5 * 60
@@ -100,6 +115,28 @@ FIRST_STATE_DEADLINE = 5 * 60
 # one model's extraction means something is wedged. The largest backbones are
 # ~196M params over ~10k images, plus a cold HuggingFace download of ~800 MB.
 STALE_DEADLINE = 30 * 60
+# The same deadline for a full-split run. The state file only moves between
+# models, and a full OCTMNIST split is 5x the images of a 10k run: the slowest
+# model of 2026-09-14 (xcit_large_24_p8, 332 s at 10k) would take ~28 min on
+# the same box, inside 30 only by luck.
+FULL_SPLIT_STALE_DEADLINE = 150 * 60
+
+
+# How long a shard's state must stay missing or unreadable, on end, before it
+# counts as absent. Several sweeps' worth, so one failed S3 read cannot do it.
+NO_STATE_GRACE = 3 * 60
+
+
+def _state_identity(st) -> tuple:
+    """Which worker wrote a state file: host, pid and start time."""
+    return (getattr(st, "host", None), getattr(st, "pid", None),
+            getattr(st, "started_at", None))
+
+
+def stale_deadline(max_train: int) -> int:
+    return FULL_SPLIT_STALE_DEADLINE if max_train == 0 else STALE_DEADLINE
+
+
 # Generous on purpose: the whole corpus is ~36B params of forward passes, and
 # the cost of a deadline that fires early is a destroyed box mid-shard, while
 # the cost of one that fires late is bounded by the stale deadline anyway.
@@ -121,13 +158,13 @@ def s3_prefix(data_flag: str, prefix: str = PREFIX) -> str:
 
 
 def worker_env(data_flag: str, rank: int, shards: int,
-               prefix: str = PREFIX) -> Dict[str, str]:
+               prefix: str = PREFIX, max_train: int = MAX_TRAIN) -> Dict[str, str]:
     """Non-secret config for one shard. Credentials are staged, never here."""
     return {
         "S3_BUCKET": BUCKET,
         "S3_FEATURES_PREFIX": prefix,
         "DATA_FLAG": data_flag,
-        "MAX_TRAIN": str(MAX_TRAIN),
+        "MAX_TRAIN": str(max_train),
         "DATA_DIR": "/workspace/data",
         "RESULTS_DIR": "/workspace/results",
         "PARALLEL_RANK": str(rank),
@@ -158,7 +195,8 @@ def missing_bundles(prefix: str, data_flag: str,
 
 
 def remote_script(data_flag: str, rank: int, shards: int, prefix: str,
-                  selection_remote: str = REMOTE_SELECTION) -> List[str]:
+                  selection_remote: str = REMOTE_SELECTION,
+                  max_train: int = MAX_TRAIN) -> List[str]:
     """The four remote commands for one shard, in order.
 
     Every command that reaches S3 sources the staged secrets first: each ssh
@@ -167,7 +205,8 @@ def remote_script(data_flag: str, rank: int, shards: int, prefix: str,
     discover on a box that is already billing.
     """
     env = " ".join(f"{k}={v}" for k, v in
-                   sorted(worker_env(data_flag, rank, shards, prefix).items()))
+                   sorted(worker_env(data_flag, rank, shards, prefix,
+                                     max_train).items()))
     base = f"{REMOTE_PATH}; {SOURCE_SECRETS} cd /workspace && {env} python -m kprelogits.extract"
     return [
         f"{REMOTE_PATH}; pip install -q {PIP_PACKAGES}",
@@ -205,15 +244,60 @@ class Box:
         return f"<box rank={self.rank} id={self.instance_id} {self.host}:{self.port}>"
 
 
+class OfferPool:
+    """Offers shared by every rank renting at once. Each is handed out once.
+
+    With serial acquisition a plain list threaded from one rank to the next
+    did this job. With ranks renting concurrently, two of them popping the
+    same cheapest offer is a failed create at best, so taking and refilling
+    happen under one lock, and ``tried`` -- every offer ever handed out --
+    keeps a marketplace re-search from re-offering a machine that is already
+    rented or already known to be bad.
+    """
+
+    def __init__(self, offers: Sequence[dict] = (), tried: Optional[set] = None):
+        self._lock = threading.Lock()
+        self._offers: List[dict] = []
+        self.tried: set = tried if tried is not None else set()
+        self.refill(offers)
+
+    def take(self) -> Optional[dict]:
+        with self._lock:
+            while self._offers:
+                offer = self._offers.pop(0)
+                oid = int(offer["id"])
+                if oid not in self.tried:
+                    self.tried.add(oid)
+                    return offer
+            return None
+
+    def refill(self, offers: Sequence[dict]) -> int:
+        """Add offers not yet tried or pooled; returns how many were new."""
+        with self._lock:
+            have = {int(o["id"]) for o in self._offers} | self.tried
+            new = [o for o in offers if int(o["id"]) not in have]
+            self._offers.extend(new)
+            return len(new)
+
+    def remaining(self) -> List[dict]:
+        with self._lock:
+            return list(self._offers)
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._offers)
+
+
 class NoUsableBox(RuntimeError):
     """Every offer tried for one rank failed to give a box that boots and
     answers ssh. A RuntimeError subclass so a caller can skip that rank instead
     of ending the run -- see acquire_with_refresh."""
 
 
-def acquire(rank: int, offers: List[dict], pubkey: str, label_base: str,
+def acquire(rank: int, offers, pubkey: str, label_base: str,
             live: List[int], known_hosts: Optional[Path],
-            env: Dict[str, str], tried: Optional[set] = None
+            env: Dict[str, str], tried: Optional[set] = None,
+            stop: Optional[threading.Event] = None
             ) -> Tuple[Box, List[dict]]:
     """Rent until one box boots and answers ssh. Returns it and the unused offers.
 
@@ -223,17 +307,21 @@ def acquire(rank: int, offers: List[dict], pubkey: str, label_base: str,
     teardown, because the next rental is about to start and two live instances
     is how a burn rate doubles unnoticed.
 
-    Consumed offers are dropped from the returned list so the next rank cannot
-    try to rent a machine this one is already holding.
+    ``offers`` is a list or a shared ``OfferPool``. Either way each offer is
+    taken once, so no other rank can try to rent a machine this one holds.
+    ``stop`` is checked before every rental and right after one, so a driver
+    that is stopping never rents again, and a box whose create was already in
+    flight is destroyed here rather than outliving the teardown.
     """
     label = f"{label_base}-r{rank}"
-    remaining = list(offers)
+    pool = offers if isinstance(offers, OfferPool) else OfferPool(offers, tried)
     last_error = None
 
-    while remaining:
-        offer = remaining.pop(0)
-        if tried is not None:
-            tried.add(int(offer["id"]))
+    while True:
+        check_stop(stop)
+        offer = pool.take()
+        if offer is None:
+            break
         print(f"  [r{rank}] offer {offer.get('id')} "
               f"${float(offer.get('dph_total') or 0):.3f}/hr {offer.get('gpu_name')} "
               f"cc={offer.get('compute_cap')} "
@@ -261,8 +349,9 @@ def acquire(rank: int, offers: List[dict], pubkey: str, label_base: str,
             live.append(instance_id)
             print(f"  [r{rank}] instance {instance_id} (teardown list: {live})",
                   flush=True)
+            check_stop(stop)
 
-            inst = wait_for_running(instance_id)
+            inst = wait_for_running(instance_id, stop=stop, tag=f"[r{rank}] ")
             print(f"  [r{rank}] {inst.get('gpu_name')} "
                   f"cpu_eff={inst.get('cpu_cores_effective')}/{inst.get('cpu_cores')} "
                   f"${float(inst.get('dph_total') or 0):.3f}/hr", flush=True)
@@ -272,9 +361,9 @@ def acquire(rank: int, offers: List[dict], pubkey: str, label_base: str,
             vast.attach_ssh_key(instance_id, pubkey)
             routes = vast.ssh_endpoints(instance_id)
             target = wait_for_ssh(
-                routes, known_hosts=known_hosts,
+                routes, known_hosts=known_hosts, stop=stop, tag=f"[r{rank}] ",
                 on_retry=lambda: vast.attach_ssh_key(instance_id, pubkey))
-            return Box(rank, instance_id, target), remaining
+            return Box(rank, instance_id, target), pool.remaining()
 
         # BaseException: this spans ten minutes of provisioning plus ssh
         # retries, the likeliest moment for a Ctrl-C, and an interrupt that
@@ -298,9 +387,10 @@ def acquire(rank: int, offers: List[dict], pubkey: str, label_base: str,
                       f"last: {last_error}")
 
 
-def acquire_with_refresh(rank: int, offers: List[dict], tried: set, *, search,
+def acquire_with_refresh(rank: int, offers, tried: set, *, search,
                          pubkey: str, label_base: str, live: List[int],
-                         known_hosts: Optional[Path], env: Dict[str, str]):
+                         known_hosts: Optional[Path], env: Dict[str, str],
+                         stop: Optional[threading.Event] = None):
     """acquire(), except that running out of offers is neither final nor fatal.
 
     Offers are a snapshot taken before the first rental, and on a bad day one
@@ -312,18 +402,26 @@ def acquire_with_refresh(rank: int, offers: List[dict], tried: set, *, search,
     return ``(None, [])``. Its models stay unextracted and a re-run picks them
     up (S3 is the resume oracle), which costs far less than the working boxes
     a fatal error would take down with it.
+
+    With a shared ``OfferPool`` the re-search refills the pool for every rank,
+    so a rank may find it already emptied again by the others; that rank is
+    then skipped like any other that ran out.
     """
     last = None
     for attempt in (1, 2):
         try:
             return acquire(rank, offers, pubkey, label_base, live, known_hosts,
-                           env, tried=tried)
+                           env, tried=tried, stop=stop)
         except NoUsableBox as e:
             last = e
         if attempt == 1:
-            offers = [o for o in search() if int(o["id"]) not in tried]
+            fresh = [o for o in search() if int(o["id"]) not in tried]
+            if isinstance(offers, OfferPool):
+                offers.refill(fresh)
+            else:
+                offers = fresh
             print(f"  [r{rank}] offers exhausted; re-searched the marketplace: "
-                  f"{len(offers)} untried offer(s)", flush=True)
+                  f"{len(fresh)} untried offer(s)", flush=True)
             if not offers:
                 break
     print(f"  [r{rank}] SKIPPED -- no usable box ({last}). Its models stay "
@@ -332,6 +430,8 @@ def acquire_with_refresh(rank: int, offers: List[dict], tried: set, *, search,
 
 
 STAGE_ATTEMPTS = 3
+# Tries per idempotent staging step (pip, data pull) on one box.
+STEP_ATTEMPTS = 3
 
 
 def bring_up(rank: int, offers: List[dict], tried: set, *, stage, live: List[int],
@@ -350,6 +450,10 @@ def bring_up(rank: int, offers: List[dict], tried: set, *, stage, live: List[int
                                            **acquire_kw)
         if box is None:
             return None, offers
+        # Stopped is a KeyboardInterrupt, so neither this check nor one inside
+        # stage() is caught below: the box stays in ``live`` for the teardown
+        # instead of being replaced.
+        check_stop(acquire_kw.get("stop"))
         try:
             stage(box)
             return box, offers
@@ -365,8 +469,15 @@ def bring_up(rank: int, offers: List[dict], tried: set, *, stage, live: List[int
 
 def stage_and_launch(box: Box, *, tarball: Path, selection: Path,
                      creds: Dict[str, str], data_flag: str, shards: int,
-                     prefix: str, known_hosts: Optional[Path]) -> None:
-    """Ship code, stage credentials, pull data, preflight, launch."""
+                     prefix: str, known_hosts: Optional[Path],
+                     max_train: int = MAX_TRAIN,
+                     stop: Optional[threading.Event] = None) -> None:
+    """Ship code, stage credentials, pull data, preflight, launch.
+
+    ``stop`` is checked between steps, never inside one: a step is a blocking
+    ssh call (the data pull can run 15 min), so a stopping driver waits for
+    the current step, and then this box goes to the teardown unlaunched.
+    """
     r = box.rank
     scp = vast.scp_args(box.host, box.port, box.user, known_hosts=known_hosts)
     # One scp per file, each to an explicit destination PATH rather than a
@@ -383,12 +494,30 @@ def stage_and_launch(box: Box, *, tarball: Path, selection: Path,
          timeout=120, label=f"r{r} untar")
     vast.stage_credentials(box.target, creds)
 
-    cmds = remote_script(data_flag, r, shards, prefix)
-    _ssh(box.target, cmds[0], timeout=SETUP_TIMEOUT, label=f"r{r} pip")
-    _ssh(box.target, cmds[1], timeout=DATA_TIMEOUT, label=f"r{r} data pull")
+    cmds = remote_script(data_flag, r, shards, prefix, max_train=max_train)
+    # pip and the data pull are idempotent, so a dropped connection costs a
+    # retry on the same box rather than the box. On 2026-09-24 four boxes lost
+    # the ssh session mid-pull ("Connection reset by peer", rc=255) and each
+    # was released and replaced -- a fresh boot, where a re-run would do.
+    for cmd, timeout, what in ((cmds[0], SETUP_TIMEOUT, "pip"),
+                               (cmds[1], DATA_TIMEOUT, "data pull")):
+        for attempt in range(1, STEP_ATTEMPTS + 1):
+            check_stop(stop)
+            try:
+                _ssh(box.target, cmd, timeout=timeout, label=f"r{r} {what}")
+                break
+            except (RuntimeError, subprocess.TimeoutExpired) as e:
+                if attempt == STEP_ATTEMPTS:
+                    raise
+                print(f"  [r{r}] {what} attempt {attempt}/{STEP_ATTEMPTS} "
+                      f"failed ({type(e).__name__}: "
+                      f"{' '.join(str(e).split())[-120:]}); retrying",
+                      flush=True)
+    check_stop(stop)
     out = _ssh(box.target, cmds[2], timeout=300, label=f"r{r} dry-run")
     print(f"  [r{r}] preflight tail: {out.strip().splitlines()[-1][:120]}"
           if out.strip() else f"  [r{r}] preflight produced no output")
+    check_stop(stop)
 
     # A hung launch is not a failed launch. Detaching through ssh is fiddly and
     # the channel stays open while anything holds it; what matters is whether
@@ -402,6 +531,84 @@ def stage_and_launch(box: Box, *, tarball: Path, selection: Path,
               f"the state file decides", flush=True)
     except Exception as e:
         print(f"  [r{r}] launch errored: {type(e).__name__}: {e}", flush=True)
+
+
+# Seconds between starting one rank's rental thread and the next. Enough to
+# spread a dozen ranks' vastai calls -- create, then show_instances every 15 s
+# per waiting box -- instead of landing them on the API all in the same second.
+STAGGER_SECONDS = 5
+
+
+def launch_all(ranks: Sequence[int], bring_up_rank: Callable[[int], tuple],
+               watch: "Watch", stop: threading.Event, *,
+               stagger: float = STAGGER_SECONDS,
+               poll: float = POLL_SECONDS) -> Dict[int, str]:
+    """Bring every rank up at once. Returns the skipped ranks and why.
+
+    Serial acquisition made the LAST box rented set the finish time: at five
+    to ten minutes a box (boot, ssh, pip, a 4 GB data pull), rank 7 of
+    2026-09-13 launched ~40 min after rank 0. Here each rank rents, stages and
+    launches on its own thread, so the ramp is as long as the slowest box
+    rather than the sum of them.
+
+    The threads only rent and stage. Everything that decides a box's fate --
+    registering it with ``watch``, sweeping for finished or dead shards,
+    releasing -- stays on this thread, so ``Watch`` needs no lock. ``live`` is
+    shared, and relies on list append/remove being atomic.
+
+    Stopping: an exception here, including Ctrl-C and the SIGTERM/SIGHUP that
+    ``install_teardown_signals`` turns into SystemExit (both arrive only on
+    this thread), sets ``stop`` and then WAITS for every thread before it
+    propagates to the teardown. Each thread raises ``Stopped`` at its next
+    check and destroys its own half-provisioned box on the way out. A thread
+    blocked in a staging step finishes that step first (up to the 15 min data
+    pull), and its box is in ``live`` for the teardown. A second Ctrl-C during
+    that wait skips it: the teardown still runs, and a thread still mid-create
+    destroys its own box once create returns, because ``stop`` is set. That is
+    the one path that can briefly outlive the teardown. ``--abort`` finds it
+    by label.
+    """
+    skipped: Dict[int, str] = {}
+
+    def staggered(rank: int, delay: float):
+        if stop.wait(delay):
+            raise Stopped()
+        return bring_up_rank(rank)
+
+    ex = ThreadPoolExecutor(max_workers=max(1, len(ranks)),
+                            thread_name_prefix="rent")
+    try:
+        futures = {ex.submit(staggered, r, i * stagger): r
+                   for i, r in enumerate(ranks)}
+        waiting = set(futures)
+        while waiting:
+            done, waiting = wait(waiting, timeout=poll,
+                                 return_when=FIRST_COMPLETED)
+            for f in done:
+                rank = futures[f]
+                box, _ = f.result()      # anything but a skip ends the run
+                if box is None:
+                    skipped[rank] = "no box that booted, staged and launched"
+                    continue
+                # A box is watched from the moment its worker was asked to
+                # start, so a box that failed staging is never watched at all.
+                watch.add(box)
+                print(f"  [r{rank}] {box} -- {len(watch.assignments[rank])} "
+                      f"models", flush=True)
+            # Release anything finished while others are still renting, and
+            # condemn anything that never started. Deadlines are safe here:
+            # ranks not yet launched are not in ``pending``, and every
+            # deadline counts from that box's own launch.
+            watch.sweep(deadlines=True, quiet=True)
+    except BaseException:
+        stop.set()
+        print("\n  stopping: waiting for the renting threads to release "
+              "their boxes (Ctrl-C again skips the wait; then run "
+              "--abort)", flush=True)
+        raise
+    finally:
+        ex.shutdown(wait=True, cancel_futures=True)
+    return skipped
 
 
 # ---------------------------------------------------------------------------
@@ -439,18 +646,31 @@ class Watch:
 
     def __init__(self, *, prefix: str, data_flag: str,
                  assignments: Dict[int, List[str]], live: List[int],
-                 scratch: Path) -> None:
+                 scratch: Path, stale_after: int = STALE_DEADLINE) -> None:
         self.prefix = prefix
         self.data_flag = data_flag
         self.assignments = assignments
         self.live = live
         self.scratch = scratch
+        self.stale_after = stale_after
         self.boxes: Dict[int, Box] = {}
         self.pending: set = set()
         self.verdicts: Dict[int, str] = {}
         self.launched_at: Dict[int, float] = {}
         self._last_seen: Dict[int, tuple] = {}
         self._last_change: Dict[int, float] = {}
+        self._no_state_since: Dict[int, float] = {}
+        self._preexisting: Dict[int, tuple] = {}
+
+    def remember_existing(self, states: Dict[int, "state.ShardState"]) -> None:
+        """Fingerprint the state files already in the prefix, before any launch.
+
+        Afterwards "an earlier run's file" means exactly one of these, and any
+        other file under a rank's name was written by that rank's new worker.
+        That needs no clock at all, where the fallback in ``_foreign`` compares
+        the box's clock with this one's.
+        """
+        self._preexisting = {r: _state_identity(st) for r, st in states.items()}
 
     def add(self, box: Box) -> None:
         """Register a launched box. Its deadlines start now, not at run start."""
@@ -462,6 +682,10 @@ class Watch:
     def _land(self, rank: int, verdict: str, *, rescue_it: bool) -> None:
         box = self.boxes[rank]
         self.verdicts[rank] = verdict
+        # Printed now, not only in the final report: on 2026-09-24 a healthy
+        # box was condemned mid-run and the log could not say which check did
+        # it -- the verdict was only ever printed at the end.
+        print(f"  [r{rank}] verdict: {verdict}", flush=True)
         if rescue_it:
             tail_remote_log(box.target)
             rescue(box, self.scratch / f"rescue-r{rank}", self.data_flag)
@@ -484,13 +708,19 @@ class Watch:
         hold the ssh channel for its full 60 s timeout, by which time the new
         worker has written.
 
-        A different shard count, or a start before this box was launched, means
-        the file is not this box's. Unparseable start times count as foreign:
-        acting on a file that cannot be attributed is how boxes get destroyed.
+        A different shard count means the file is not this box's. Otherwise,
+        when ``remember_existing`` saw this rank's file before launch, foreign
+        means *that* file, unchanged. Only without such a record does it fall
+        back to time: a start before this box was launched (less a skew
+        allowance) is foreign, and an unparseable start time counts as foreign
+        too -- acting on a file that cannot be attributed is how boxes get
+        destroyed.
         """
         shards = getattr(st, "shards", None)
         if shards is not None and shards != len(self.assignments):
             return True
+        if rank in self._preexisting:
+            return _state_identity(st) == self._preexisting[rank]
         raw = getattr(st, "started_at", None)
         if not raw:
             return False
@@ -516,10 +746,22 @@ class Watch:
             since_launch = time.time() - self.launched_at[rank]
 
             if st is None:
-                if deadlines and since_launch > FIRST_STATE_DEADLINE:
-                    self._land(rank, "no state file; the worker never started",
+                # Absent and unreadable look the same from here: get_json
+                # answers None for both, after one attempt. So one failed read
+                # must not condemn a box -- on 2026-09-24 a healthy shard
+                # mid-model was rescued and destroyed on what was, most
+                # likely, exactly that. Only a state missing for
+                # NO_STATE_GRACE on end is a worker that never started.
+                now = time.time()
+                since = self._no_state_since.setdefault(rank, now)
+                if (deadlines and since_launch > FIRST_STATE_DEADLINE
+                        and now - since >= NO_STATE_GRACE):
+                    self._land(rank, f"no state file for "
+                                     f"{(now - since) / 60:.0f} min; the "
+                                     f"worker never started or cannot reach S3",
                                rescue_it=True)
                 continue
+            self._no_state_since.pop(rank, None)
 
             fp = (st.phase, st.extracted, st.uploaded, st.failed, st.updated_at,
                   st.current)
@@ -542,9 +784,9 @@ class Watch:
                     self._land(rank, why, rescue_it=True)
                 continue
 
-            if deadlines and time.time() - self._last_change[rank] > STALE_DEADLINE:
+            if deadlines and time.time() - self._last_change[rank] > self.stale_after:
                 self._land(rank, f"no state change for "
-                                 f"{STALE_DEADLINE // 60} min while {st.phase}",
+                                 f"{self.stale_after // 60} min while {st.phase}",
                            rescue_it=True)
 
     def poll(self) -> Dict[int, str]:
@@ -590,6 +832,23 @@ def rescue(box: Box, out_dir: Path, data_flag: str) -> None:
 # Modes
 # ---------------------------------------------------------------------------
 
+def pending_selection(selection: Path, todo: Sequence[str], dest: Path,
+                      shards: int) -> Tuple[Path, int]:
+    """Write the selection narrowed to ``todo``; return it and the shard count.
+
+    Entries keep their original fields and order. Shards are capped at the
+    number of models, so no rank is rented for an empty share.
+    """
+    doc = json.loads(Path(selection).read_text())
+    keep = set(todo)
+    doc["models"] = [m for m in doc["models"] if m["name"] in keep]
+    doc["note"] = (f"pending subset of {selection}: the {len(doc['models'])} "
+                   f"model(s) not yet in S3 when this run started")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(doc, indent=2))
+    return dest, max(1, min(shards, len(doc["models"])))
+
+
 def load_models(selection: Path) -> List[str]:
     doc = json.loads(Path(selection).read_text())
     names = [m["name"] for m in doc["models"]]
@@ -605,8 +864,10 @@ def plan(args, models: List[str]) -> int:
     print(f"  selection  {args.selection}")
     print(f"  s3 prefix  {prefix}")
     print(f"  image      {IMAGE}   disk {DISK_GB} GB")
+    print(f"  max_train  {args.max_train or 'full split'}")
     print(f"  deadlines  first-state {FIRST_STATE_DEADLINE // 60}m  "
-          f"stale {STALE_DEADLINE // 60}m  job {JOB_DEADLINE // 3600}h")
+          f"stale {stale_deadline(args.max_train) // 60}m  "
+          f"job {JOB_DEADLINE // 3600}h")
 
     print("\n  shard assignment (round-robin over the name-sorted list):")
     for r in range(args.shards):
@@ -618,15 +879,18 @@ def plan(args, models: List[str]) -> int:
         done = [n for n in models if f"{args.data_flag}_{n}_features.npz" in have]
         print(f"\n  already in S3: {len(done)}/{len(models)} "
               f"({len(have)} bundle(s) under the prefix in total)")
-        if done:
-            print(f"    the worker skips these: {done[:4]}"
-                  f"{' ...' if len(done) > 4 else ''}")
+        if done and len(done) < len(models):
+            todo = [n for n in models if n not in set(done)]
+            k = max(1, min(args.shards, len(todo)))
+            print(f"    --go would shard only the {len(todo)} missing, "
+                  f"{k} way(s): "
+                  f"{[len(shard_models(todo, k, r)) for r in range(k)]} per box")
     except Exception as e:
         print(f"\n  could not list {prefix}: {type(e).__name__}: {e}")
 
     print(f"\n  worker env (rank 0 of {args.shards}):")
     for k, v in sorted(worker_env(args.data_flag, 0, args.shards,
-                                  args.prefix).items()):
+                                  args.prefix, args.max_train).items()):
         print(f"    {k}={v}")
 
     print(f"\n  offer query: {RUN_OFFER_QUERY}")
@@ -644,7 +908,8 @@ def plan(args, models: List[str]) -> int:
         print(f"  could not search offers: {type(e).__name__}: {e}")
 
     print("\n  then, per box:")
-    for line in remote_script(args.data_flag, 0, args.shards, args.prefix):
+    for line in remote_script(args.data_flag, 0, args.shards, args.prefix,
+                              max_train=args.max_train):
         print(f"    {line[:200]}")
     print("\n  rents nothing. Re-run with --go to execute.")
     return 0
@@ -671,8 +936,6 @@ def abort(label_base: str = "run-") -> int:
 def go(args, models: List[str], rid: str, scratch: Path) -> int:
     prefix = s3_prefix(args.data_flag, args.prefix)
     label_base = f"run-{rid}"
-    assignments = {r: shard_models(models, args.shards, r)
-                   for r in range(args.shards)}
     print(f"=== RUN {rid}  {args.data_flag}  {len(models)} models "
           f"across {args.shards} shard(s) -> {prefix}\n")
 
@@ -716,11 +979,25 @@ def go(args, models: List[str], rid: str, scratch: Path) -> int:
     print(f"  code {tarball.stat().st_size // 1024} KB, "
           f"selection {selection} ({len(models)} models)")
 
-    already = len(models) - len(missing_bundles(prefix, args.data_flag, models))
+    todo = missing_bundles(prefix, args.data_flag, models)
+    already = len(models) - len(todo)
     print(f"  already in S3: {already}/{len(models)}")
-    if already == len(models):
+    if not todo:
         print("  everything is already extracted; nothing to rent")
         return 0
+    if already:
+        # Shard what is LEFT, not the whole list. Round-robin over the full
+        # list gives each rank its share of the original, and the leftovers of
+        # a partial run cluster by the old rank that failed: on 2026-09-24 the
+        # 163 left of a 12-shard run, resharded 8 ways, gave two boxes nothing
+        # at all (rented, staged, released) and two others 40 each.
+        selection, args.shards = pending_selection(
+            selection, todo, scratch / f"selection-{rid}-pending.json",
+            args.shards)
+        print(f"  resuming: sharding the {len(todo)} missing model(s) "
+              f"{args.shards} way(s), selection {selection}")
+    assignments = {r: shard_models(todo, args.shards, r)
+                   for r in range(args.shards)}
 
     # The real preflight, locally, against the exact prefix the boxes will use.
     # It is the same code either way, so anything it rejects it would reject on
@@ -729,7 +1006,8 @@ def go(args, models: List[str], rid: str, scratch: Path) -> int:
     local = scratch / f"preflight-{rid}"
     (local / "data").mkdir(parents=True, exist_ok=True)
     (local / "results").mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, **worker_env(args.data_flag, 0, args.shards, args.prefix),
+    env = {**os.environ, **worker_env(args.data_flag, 0, args.shards, args.prefix,
+                                      args.max_train),
            "DATA_DIR": str(local / "data"), "RESULTS_DIR": str(local / "results")}
     r = subprocess.run(
         [sys.executable, "-m", "kprelogits.extract",
@@ -752,47 +1030,42 @@ def go(args, models: List[str], rid: str, scratch: Path) -> int:
         return 1
     print(f"  {len(offers)} offer(s) held for {args.shards} shard(s)")
 
-    # -- Phase 2/3: rent, stage and launch, one box at a time --------------
-    known_hosts = scratch / f"known_hosts-{rid}"
-    known_hosts.write_text("")
-
+    # -- Phase 2/3: rent, stage and launch, every rank at once --------------
     live: List[int] = []
     verdicts: Dict[int, str] = {}
     watch = Watch(prefix=prefix, data_flag=args.data_flag,
-                  assignments=assignments, live=live, scratch=scratch)
+                  assignments=assignments, live=live, scratch=scratch,
+                  stale_after=stale_deadline(args.max_train))
+    pool = OfferPool(offers)
+    stop = threading.Event()
+    search = lambda: vast.search_offers(RUN_OFFER_QUERY,  # noqa: E731
+                                        limit=args.shards * 2 + 4)
 
-    # Entered BEFORE anything is rented, holding a list that is mutated as
-    # boxes come and go. Nothing below can leave an instance outside it.
-    with vast.teardown(live):
-        print(f"\n[2/4] renting and launching {args.shards} box(es)")
-        skipped: Dict[int, str] = {}
-        tried: set = set()
-        search = lambda: vast.search_offers(RUN_OFFER_QUERY,  # noqa: E731
-                                            limit=args.shards * 2 + 4)
+    def bring_up_rank(rank: int):
+        # A known_hosts file per rank: concurrent ssh processes appending to
+        # one file can interleave their writes.
+        known_hosts = scratch / f"known_hosts-{rid}-r{rank}"
+        known_hosts.write_text("")
         stage = lambda b: stage_and_launch(  # noqa: E731
             b, tarball=tarball, selection=selection, creds=creds,
             data_flag=args.data_flag, shards=args.shards, prefix=args.prefix,
-            known_hosts=known_hosts)
-        for rank in range(args.shards):
-            box, offers = bring_up(
-                rank, offers, tried, stage=stage, live=live, search=search,
-                pubkey=pubkey, label_base=label_base, known_hosts=known_hosts,
-                env=worker_env(args.data_flag, rank, args.shards, args.prefix))
-            if box is None:
-                skipped[rank] = "no box that booted, staged and launched"
-                continue
-            # Only now: a box is watched from the moment its worker was asked
-            # to start, so a box that failed staging is never watched at all.
-            watch.add(box)
-            print(f"  [r{rank}] {box} -- {len(assignments[rank])} models",
-                  flush=True)
-            # Release anything that finished while this box was provisioning,
-            # and condemn anything that never started. Deadlines are safe here:
-            # ranks not yet rented are not in ``pending`` at all, and every
-            # deadline counts from that box's own launch. Leaving them off
-            # meant a worker that never started on rank 0 went unnoticed until
-            # rank 7 launched -- an hour of billing a dead box, at eight boxes.
-            watch.sweep(deadlines=True, quiet=True)
+            known_hosts=known_hosts, max_train=args.max_train, stop=stop)
+        return bring_up(
+            rank, pool, pool.tried, stage=stage, live=live, search=search,
+            pubkey=pubkey, label_base=label_base, known_hosts=known_hosts,
+            env=worker_env(args.data_flag, rank, args.shards, args.prefix,
+                           args.max_train),
+            stop=stop)
+
+    # Entered BEFORE anything is rented, holding a list that is mutated as
+    # boxes come and go. Nothing below can leave an instance outside it.
+    # Before anything launches: which state files are an earlier run's.
+    watch.remember_existing(state.read_states(prefix))
+
+    with vast.teardown(live):
+        print(f"\n[2/4] renting and launching {args.shards} box(es) "
+              f"concurrently")
+        skipped = launch_all(range(args.shards), bring_up_rank, watch, stop)
 
         print(f"\n[3/4] watching {len(watch.pending)} shard(s); "
               f"each box is destroyed as its shard lands")
@@ -851,6 +1124,9 @@ def main(argv=None) -> int:
     p.add_argument("--prefix", default=PREFIX,
                    help=f"S3_FEATURES_PREFIX (default {PREFIX}); the worker "
                         f"appends the data flag")
+    p.add_argument("--max-train", type=int, default=MAX_TRAIN,
+                   help=f"train subsample (default {MAX_TRAIN}); 0 = the full "
+                        f"split, which needs its own --prefix")
     p.add_argument("--go", action="store_true",
                    help="actually rent hardware (default prints a plan)")
     p.add_argument("--abort", action="store_true",
@@ -869,6 +1145,15 @@ def main(argv=None) -> int:
         p.error("--selection is required")
     if args.shards < 1:
         p.error("--shards must be >= 1")
+    if args.max_train < 0:
+        p.error("--max-train must be >= 0 (0 = the full split)")
+    if args.max_train != MAX_TRAIN and args.prefix == PREFIX:
+        # The worker's preflight would refuse too, but only in go mode; plan
+        # mode would cheerfully report every bundle "already in S3" -- the
+        # 10k ones, which the resume oracle would then skip.
+        p.error(f"--max-train {args.max_train} into the production prefix "
+                f"{PREFIX}/ would mix train subsamples under one bundle name; "
+                f"pass a separate --prefix (e.g. {PREFIX}_fulltrain)")
 
     models = load_models(args.selection)
     if not args.go:

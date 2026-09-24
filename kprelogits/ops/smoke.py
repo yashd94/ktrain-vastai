@@ -238,6 +238,7 @@ def compare_bundles(smoke: Path, reference: Optional[Path]) -> bool:
     normalization diverged, which is exactly what this is here to catch.
     """
     import numpy as np
+    from ..compare_subset import feature_agreement
     from ..contracts import validate_prelogit_bundle
 
     ok = True
@@ -281,17 +282,10 @@ def compare_bundles(smoke: Path, reference: Optional[Path]) -> bool:
             print(f"  MISMATCH {yk}: labels differ -- the subsample or data "
                   f"path changed")
             ok = False
-        a = new[xk].astype(np.float64)
-        b = old[xk].astype(np.float64)
-        num = (a * b).sum(1)
-        den = np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1)
-        cos = num / np.maximum(den, 1e-12)
-        rel = np.linalg.norm(a - b) / max(np.linalg.norm(b), 1e-12)
-        verdict = "OK" if cos.min() > 0.999 and rel < 1e-2 else "FAIL"
-        if verdict == "FAIL":
-            ok = False
-        print(f"  {xk}: cos min={cos.min():.6f} mean={cos.mean():.6f}  "
-              f"rel_fro={rel:.2e}  max|d|={np.abs(a - b).max():.2e}  {verdict}")
+        cmin, cmean, rel, mx, good = feature_agreement(new[xk], old[xk])
+        ok &= good
+        print(f"  {xk}: cos min={cmin:.6f} mean={cmean:.6f}  "
+              f"rel_fro={rel:.2e}  max|d|={mx:.2e}  {'OK' if good else 'FAIL'}")
 
     return ok
 
@@ -390,7 +384,32 @@ def abort() -> int:
 # The run
 # ---------------------------------------------------------------------------
 
-def wait_for_running(instance_id: int) -> dict:
+class Stopped(KeyboardInterrupt):
+    """Raised in a renting thread when the driver has decided to stop.
+
+    Only the main thread receives Ctrl-C and SIGTERM, so a thread renting in
+    parallel learns of it through an Event, checked wherever it would
+    otherwise sit for minutes. It subclasses KeyboardInterrupt so every
+    handler already written for an interrupt treats it as one: ``acquire``
+    destroys the half-provisioned box and re-raises, and ``bring_up`` does
+    not mistake it for a staging failure worth a replacement box.
+    """
+
+
+def check_stop(stop) -> None:
+    if stop is not None and stop.is_set():
+        raise Stopped()
+
+
+def _pause(seconds: float, stop) -> None:
+    """Sleep, but wake at once -- and raise -- if ``stop`` is set."""
+    if stop is None:
+        time.sleep(seconds)
+    elif stop.wait(seconds):
+        raise Stopped()
+
+
+def wait_for_running(instance_id: int, *, stop=None, tag: str = "") -> dict:
     """Poll until the box is running; on timeout, say what vast last reported.
 
     ``actual_status`` alone ("loading") cannot tell a slow image pull from a
@@ -401,23 +420,24 @@ def wait_for_running(instance_id: int) -> dict:
     deadline = time.time() + RUNNING_DEADLINE
     last_msg = ""
     while time.time() < deadline:
+        check_stop(stop)
         inst = next((i for i in vast.show_instances()
                      if int(i.get("id", -1)) == instance_id), None)
         status = (inst or {}).get("actual_status")
         msg = " ".join(str((inst or {}).get("status_msg") or "").split())[:200]
-        print(f"  status={status}" + (f"  [{msg}]" if msg and msg != last_msg else ""),
+        print(f"  {tag}status={status}" + (f"  [{msg}]" if msg and msg != last_msg else ""),
               flush=True)
         last_msg = msg or last_msg
         if status == "running":
             return inst
-        time.sleep(15)
+        _pause(15, stop)
     raise RuntimeError(f"instance {instance_id} never reached running in "
                        f"{RUNNING_DEADLINE // 60} min; vast last said: "
                        f"{last_msg or '(nothing)'}")
 
 
 def wait_for_ssh(routes: List[tuple], *, user: str = "root", on_retry=None,
-                 known_hosts: Optional[Path] = None):
+                 known_hosts: Optional[Path] = None, stop=None, tag: str = ""):
     """Return ssh args for the first route that answers, trying each in turn.
 
     Both routes are tried every round rather than committing to one, because
@@ -436,21 +456,22 @@ def wait_for_ssh(routes: List[tuple], *, user: str = "root", on_retry=None,
     while time.time() < deadline:
         attempt += 1
         for label, host, port in routes:
+            check_stop(stop)
             target = vast.ssh_args(host, port, user, known_hosts=known_hosts)
             r = subprocess.run(["ssh", *target, "true"], capture_output=True,
                                text=True, timeout=40)
             if r.returncode == 0:
-                print(f"  ssh up via {label} ({host}:{port})")
+                print(f"  {tag}ssh up via {label} ({host}:{port})")
                 return target
             last = f"{label}: " + (r.stderr or "").strip().replace("\n", " ")[:100]
-            print(f"  ssh not ready ({attempt}) {last}", flush=True)
+            print(f"  {tag}ssh not ready ({attempt}) {last}", flush=True)
         if on_retry is not None and attempt == 2:
-            print("  re-attaching ssh key", flush=True)
+            print(f"  {tag}re-attaching ssh key", flush=True)
             try:
                 on_retry()
             except Exception as e:
-                print(f"  re-attach failed: {type(e).__name__}: {e}")
-        time.sleep(10)
+                print(f"  {tag}re-attach failed: {type(e).__name__}: {e}")
+        _pause(10, stop)
     raise RuntimeError(f"ssh never came up on any route; last: {last}")
 
 

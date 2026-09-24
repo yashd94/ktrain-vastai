@@ -102,6 +102,61 @@ def image_transform(n_channels: int):
     return transforms.Compose(tx)
 
 
+def train_subset_indices(full_train: int, max_train: Optional[int],
+                         seed: int = 42) -> Optional[List[int]]:
+    """The train rows a ``max_train`` bundle holds, in bundle order.
+
+    ``None`` means the whole split in dataset order. Anything that must line a
+    subsampled bundle up against a full-split one row by row needs exactly
+    these indices, so this is the one place they are computed.
+    """
+    if not max_train or full_train <= max_train:
+        return None
+    import torch
+    g = torch.Generator().manual_seed(seed)
+    return torch.randperm(full_train, generator=g)[:max_train].tolist()
+
+
+# Datasets that are NOT in the medmnist package but ship in its npz layout
+# (``{split}_images`` uint8 NHWC, ``{split}_labels`` (n, 1)). The worker
+# fetches ``{data_flag}_224.npz`` into ``root`` exactly as for a MedMNIST set;
+# here a split may be empty (shape (0, ...)), which yields a (0, feat_dim)
+# bundle member rather than a failure.
+EXTRA_INFO: Dict[str, Dict[str, Any]] = {
+    # DermaMNIST-E (Abhishek, Jain & Hamarneh 2025; Zenodo 11101338), val and
+    # test only: the ISIC 2018 Task 3 validation (193) and test (1511)
+    # partitions, resized to 224. Same seven classes as dermamnist. The train
+    # split is HAM10000 = dermamnist's images regrouped, so it is left empty.
+    "dermamniste": {
+        "python_class": None, "n_channels": 3,
+        "label": {"0": "actinic keratoses and intraepithelial carcinoma",
+                  "1": "basal cell carcinoma",
+                  "2": "benign keratosis-like lesions",
+                  "3": "dermatofibroma", "4": "melanoma",
+                  "5": "melanocytic nevi", "6": "vascular lesions"},
+    },
+}
+
+
+class NpzImageDataset:
+    """One split of a MedMNIST-layout npz, served like a medmnist dataset."""
+
+    def __init__(self, npz, split: str, transform=None) -> None:
+        self.imgs = npz[f"{split}_images"]
+        self.labels = npz[f"{split}_labels"]
+        self.transform = transform
+
+    def __len__(self) -> int:
+        return len(self.imgs)
+
+    def __getitem__(self, index: int):
+        from PIL import Image
+        img = Image.fromarray(self.imgs[index])
+        if self.transform is not None:
+            img = self.transform(img)
+        return img, self.labels[index].astype("int64")
+
+
 def get_loaders(data_flag: str, root: str, *, max_train: Optional[int] = 10_000,
                 batch_size: int = 128, num_workers: int = 4,
                 prefetch_factor: int = 4, seed: int = 42):
@@ -116,27 +171,34 @@ def get_loaders(data_flag: str, root: str, *, max_train: Optional[int] = 10_000,
     """
     import os
 
-    import medmnist
     import torch
-    from medmnist import INFO
     from torch.utils.data import DataLoader
 
     os.makedirs(root, exist_ok=True)
-    ds_info = INFO[data_flag]
-    DataClass = getattr(medmnist, ds_info["python_class"])
-    tx = image_transform(int(ds_info.get("n_channels", 3)))
+    if data_flag in EXTRA_INFO:
+        import numpy as np
+        ds_info = EXTRA_INFO[data_flag]
+        tx = image_transform(int(ds_info.get("n_channels", 3)))
+        npz = np.load(os.path.join(root, f"{data_flag}_224.npz"))
+        train_ds, val_ds, test_ds = (NpzImageDataset(npz, s, tx)
+                                     for s in ("train", "val", "test"))
+    else:
+        import medmnist
+        from medmnist import INFO
+        ds_info = INFO[data_flag]
+        DataClass = getattr(medmnist, ds_info["python_class"])
+        tx = image_transform(int(ds_info.get("n_channels", 3)))
 
-    kw = dict(transform=tx, download=True, size=224, root=root)
-    with contextlib.redirect_stderr(io.StringIO()):
-        train_ds = DataClass(split="train", **kw)
-        val_ds = DataClass(split="val", **kw)
-        test_ds = DataClass(split="test", **kw)
+        kw = dict(transform=tx, download=True, size=224, root=root)
+        with contextlib.redirect_stderr(io.StringIO()):
+            train_ds = DataClass(split="train", **kw)
+            val_ds = DataClass(split="val", **kw)
+            test_ds = DataClass(split="test", **kw)
 
     full_train = len(train_ds)
-    if max_train and full_train > max_train:
-        g = torch.Generator().manual_seed(seed)
-        idx = torch.randperm(full_train, generator=g)[:max_train]
-        train_ds = torch.utils.data.Subset(train_ds, idx.tolist())
+    idx = train_subset_indices(full_train, max_train, seed)
+    if idx is not None:
+        train_ds = torch.utils.data.Subset(train_ds, idx)
         print(f"  subsampled train: {len(train_ds)}/{full_train} (seed {seed})")
 
     ldr_kw: Dict[str, Any] = dict(batch_size=batch_size, shuffle=False,
@@ -285,6 +347,13 @@ def extract_split(encoder, loader, device, *, split_name: str = "",
     use_amp = device.type == "cuda"
     tag = f" {split_name}" if split_name else ""
 
+    if len(dataset) == 0:
+        # An empty split (dermamniste has no train). torch.cat([]) would raise;
+        # the caller widens these to (0, feat_dim) once feat_dim is known.
+        stats = ({"data": 0.0, "forward": 0.0, "batch_size": batch_size}
+                 if timing else None)
+        return torch.empty(0, 0), torch.empty(0, dtype=torch.long), stats
+
     while batch_size >= 1:
         feats, labels = [], []
         t_data = t_forward = 0.0
@@ -353,6 +422,10 @@ def extract_all_splits(encoder, train_loader, val_loader, test_loader, device, *
         del encoder
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+    widths = [x.shape[1] for x in (x_train, x_val, x_test) if x.shape[0]]
+    if widths:
+        x_train, x_val, x_test = (x if x.shape[0] else torch.empty(0, widths[0])
+                                  for x in (x_train, x_val, x_test))
     return dict(x_train=x_train, y_train=y_train, x_val=x_val, y_val=y_val,
                 x_test=x_test, y_test=y_test,
                 split_timings=(t_tr, t_va, t_te), seconds=t1 - t0)

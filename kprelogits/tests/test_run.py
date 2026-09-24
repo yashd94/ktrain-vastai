@@ -237,7 +237,7 @@ def test_acquire_registers_the_instance_before_it_can_fail(monkeypatch):
     seen = {}
     monkeypatch.setattr(run.vast, "create", lambda *a, **k: 4242)
     monkeypatch.setattr(run, "wait_for_running",
-                        lambda i: (_ for _ in ()).throw(RuntimeError("never booted")))
+                        lambda i, **k: (_ for _ in ()).throw(RuntimeError("never booted")))
     monkeypatch.setattr(run.vast, "destroy",
                         lambda i, *a, **k: seen.setdefault("destroyed", i) or True)
 
@@ -251,7 +251,7 @@ def test_acquire_registers_the_instance_before_it_can_fail(monkeypatch):
 def test_acquire_keeps_the_id_when_the_destroy_fails(monkeypatch):
     monkeypatch.setattr(run.vast, "create", lambda *a, **k: 99)
     monkeypatch.setattr(run, "wait_for_running",
-                        lambda i: (_ for _ in ()).throw(RuntimeError("no boot")))
+                        lambda i, **k: (_ for _ in ()).throw(RuntimeError("no boot")))
     monkeypatch.setattr(run.vast, "destroy", lambda *a, **k: False)
 
     live: list = []
@@ -266,9 +266,9 @@ def test_acquire_adopts_an_instance_a_failed_create_left_behind(monkeypatch):
         raise RuntimeError("connection reset")
     monkeypatch.setattr(run.vast, "create", failing_create)
     monkeypatch.setattr(run.vast, "find_by_label", lambda label: [{"id": 777}])
-    monkeypatch.setattr(run, "wait_for_running", lambda i: {"gpu_name": "x"})
+    monkeypatch.setattr(run, "wait_for_running", lambda i, **k: {"gpu_name": "x"})
     monkeypatch.setattr(run.vast, "attach_ssh_key", lambda *a, **k: None)
-    monkeypatch.setattr(run.vast, "ssh_endpoints", lambda i: [("proxy", "h", 22)])
+    monkeypatch.setattr(run.vast, "ssh_endpoints", lambda i, **k: [("proxy", "h", 22)])
     monkeypatch.setattr(run, "wait_for_ssh",
                         lambda *a, **k: ["-p", "22", "root@h"])
 
@@ -280,9 +280,9 @@ def test_acquire_adopts_an_instance_a_failed_create_left_behind(monkeypatch):
 def test_acquire_does_not_reuse_a_consumed_offer(monkeypatch):
     """Two ranks renting the same offer id is a create failure at best."""
     monkeypatch.setattr(run.vast, "create", lambda oid, **k: 100 + oid)
-    monkeypatch.setattr(run, "wait_for_running", lambda i: {"gpu_name": "x"})
+    monkeypatch.setattr(run, "wait_for_running", lambda i, **k: {"gpu_name": "x"})
     monkeypatch.setattr(run.vast, "attach_ssh_key", lambda *a, **k: None)
-    monkeypatch.setattr(run.vast, "ssh_endpoints", lambda i: [("proxy", "h", 22)])
+    monkeypatch.setattr(run.vast, "ssh_endpoints", lambda i, **k: [("proxy", "h", 22)])
     monkeypatch.setattr(run, "wait_for_ssh",
                         lambda *a, **k: ["-p", "22", "root@h"])
 
@@ -299,7 +299,7 @@ def test_ctrl_c_during_acquisition_destroys_and_reraises(monkeypatch):
     seen = {}
     monkeypatch.setattr(run.vast, "create", lambda *a, **k: 5)
     monkeypatch.setattr(run, "wait_for_running",
-                        lambda i: (_ for _ in ()).throw(KeyboardInterrupt()))
+                        lambda i, **k: (_ for _ in ()).throw(KeyboardInterrupt()))
     monkeypatch.setattr(run.vast, "destroy",
                         lambda i, *a, **k: seen.setdefault("d", i) or True)
     with pytest.raises(KeyboardInterrupt):
@@ -367,6 +367,7 @@ def test_the_deadline_flag_is_what_condemns_a_silent_shard(monkeypatch, tmp_path
     w = _watch(monkeypatch, tmp_path, {})
     w.add(run.Box(0, 1, ["-p", "22", "root@h"]))
     w.launched_at[0] = 0.0                      # long past FIRST_STATE_DEADLINE
+    w._no_state_since[0] = 0.0                  # and missing for the whole grace
     w.sweep(deadlines=False, quiet=True)
     assert w.pending == {0} and w.verdicts == {}
 
@@ -526,7 +527,7 @@ def test_no_usable_box_is_still_a_runtime_error():
 def test_acquire_records_every_offer_it_tries(monkeypatch):
     monkeypatch.setattr(run.vast, "create", lambda *a, **k: 7)
     monkeypatch.setattr(run, "wait_for_running",
-                        lambda i: (_ for _ in ()).throw(RuntimeError("no boot")))
+                        lambda i, **k: (_ for _ in ()).throw(RuntimeError("no boot")))
     monkeypatch.setattr(run.vast, "destroy", lambda *a, **k: True)
     tried: set = set()
     with pytest.raises(run.NoUsableBox):
@@ -644,3 +645,387 @@ def test_an_interrupt_during_staging_still_reaches_the_teardown(monkeypatch):
 
     with pytest.raises(KeyboardInterrupt):
         _bring_up(monkeypatch, [_FakeBox(1)], stage)
+
+
+# ---- full-split runs (--max-train 0) --------------------------------------
+
+def test_max_train_reaches_the_worker_env_and_the_launch():
+    """The driver's --max-train is only real if the box's worker sees it. The
+    default must stay the production subsample, or a plain re-run into the
+    production prefix would change what its bundles mean."""
+    assert run.worker_env("octmnist", 0, 4)["MAX_TRAIN"] == "10000"
+    assert run.worker_env("octmnist", 0, 4, max_train=0)["MAX_TRAIN"] == "0"
+    cmds = run.remote_script("octmnist", 1, 4, "p_full", max_train=0)
+    assert "MAX_TRAIN=0" in cmds[2] and "MAX_TRAIN=0" in cmds[3]
+
+
+def test_the_worker_reads_max_train_zero_as_the_full_split(monkeypatch):
+    from kprelogits.config import ExtractConfig
+    for k, v in run.worker_env("octmnist", 0, 4, "p_full", max_train=0).items():
+        monkeypatch.setenv(k, v)
+    cfg = ExtractConfig.from_env()
+    assert cfg.max_train == 0
+    assert cfg.s3_prefix == run.s3_prefix("octmnist", "p_full")
+
+
+def test_a_full_split_run_into_the_production_prefix_is_refused(capsys):
+    """Bundle names do not encode max_train. Full-split bundles written into
+    the production prefix would sit beside 10k ones under the same names --
+    and the resume oracle would skip every model that already has a 10k
+    bundle, reporting success having extracted nothing."""
+    with pytest.raises(SystemExit):
+        run.main(["--selection", "x.json", "--data-flag", "octmnist",
+                  "--max-train", "0"])
+    assert "separate --prefix" in capsys.readouterr().err
+
+
+def test_a_full_split_run_gets_a_longer_stale_deadline():
+    """State only moves between models, and a full OCTMNIST split is ~5x the
+    images per model: the 10k deadline would condemn a box mid-model."""
+    assert run.stale_deadline(10_000) == run.STALE_DEADLINE
+    assert run.stale_deadline(0) > 4 * run.STALE_DEADLINE
+
+
+def test_watch_condemns_on_its_own_stale_deadline(monkeypatch, tmp_path):
+    w = _watch(monkeypatch, tmp_path, {0: _St("running")})
+    w.stale_after = 60
+    w.add(run.Box(0, 1, ["-p", "22", "root@h"]))
+    w.sweep(deadlines=True, quiet=True)          # first sighting starts the clock
+    assert w.pending == {0}
+    w._last_change[0] -= 61
+    w.sweep(deadlines=True, quiet=True)
+    assert "no state change for 1 min" in w.verdicts[0]
+
+
+def test_the_run_query_filters_host_ram():
+    """A full-split worker holds the decoded split plus up to ~1.6 GB of
+    features, copied on the way to disk; 16 GB hosts are on the market."""
+    assert "cpu_ram>=32" in run.RUN_OFFER_QUERY
+
+
+# ---- concurrent acquisition -----------------------------------------------
+
+import threading  # noqa: E402
+
+
+def test_the_offer_pool_hands_each_offer_out_once_under_contention():
+    """Two ranks renting the same offer is a failed create at best."""
+    pool = run.OfferPool([{"id": i} for i in range(200)])
+    got, lock = [], threading.Lock()
+    start = threading.Barrier(8)
+
+    def taker():
+        start.wait()
+        while (o := pool.take()) is not None:
+            with lock:
+                got.append(o["id"])
+
+    threads = [threading.Thread(target=taker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(got) == list(range(200))
+    assert pool.tried == set(range(200))
+
+
+def test_a_refill_skips_offers_tried_or_already_pooled():
+    pool = run.OfferPool([{"id": 1}, {"id": 2}])
+    assert pool.take()["id"] == 1
+    assert pool.refill([{"id": 1}, {"id": 2}, {"id": 3}]) == 1
+    assert [o["id"] for o in pool.remaining()] == [2, 3]
+
+
+def test_ranks_share_one_pool_through_acquire(monkeypatch):
+    monkeypatch.setattr(run.vast, "create", lambda oid, **k: 100 + oid)
+    monkeypatch.setattr(run, "wait_for_running", lambda i, **k: {"gpu_name": "x"})
+    monkeypatch.setattr(run.vast, "attach_ssh_key", lambda *a, **k: None)
+    monkeypatch.setattr(run.vast, "ssh_endpoints", lambda i: [("proxy", "h", 22)])
+    monkeypatch.setattr(run, "wait_for_ssh", lambda *a, **k: ["-p", "22", "root@h"])
+    pool = run.OfferPool([{"id": i} for i in range(6)])
+    live: list = []
+    boxes = []
+    threads = [threading.Thread(target=lambda r=r: boxes.append(
+        run.acquire(r, pool, "k", "run-x", live, None, {})[0])) for r in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(b.instance_id for b in boxes) == list(range(100, 106))
+
+
+def test_a_stop_before_renting_rents_nothing(monkeypatch):
+    monkeypatch.setattr(run.vast, "create",
+                        lambda *a, **k: pytest.fail("rented while stopping"))
+    stop = threading.Event()
+    stop.set()
+    with pytest.raises(run.Stopped):
+        run.acquire(0, [{"id": 1}], "k", "run-x", [], None, {}, stop=stop)
+
+
+def test_a_create_that_lands_after_the_stop_is_destroyed(monkeypatch):
+    """The race parallel renting adds: the main thread stops while a create is
+    in flight. The id must still be registered, and the thread that rented it
+    must destroy it rather than carry on provisioning."""
+    stop = threading.Event()
+    destroyed = []
+
+    def create(*a, **k):
+        stop.set()                       # the stop arrives mid-create
+        return 31
+
+    monkeypatch.setattr(run.vast, "create", create)
+    monkeypatch.setattr(run, "wait_for_running",
+                        lambda i, **k: pytest.fail("provisioned after stop"))
+    monkeypatch.setattr(run.vast, "destroy",
+                        lambda i, *a, **k: destroyed.append(i) or True)
+    live: list = []
+    with pytest.raises(run.Stopped):
+        run.acquire(0, [{"id": 1}], "k", "run-x", live, None, {}, stop=stop)
+    assert destroyed == [31] and live == []
+
+
+def test_a_stop_during_staging_is_not_a_staging_failure(monkeypatch):
+    """A stopping driver must not answer with a replacement rental."""
+    def stage(b):
+        raise run.Stopped()
+
+    with pytest.raises(run.Stopped):
+        _bring_up(monkeypatch, [_FakeBox(1), _FakeBox(2)], stage)
+
+
+def test_wait_for_running_wakes_on_stop(monkeypatch):
+    from kprelogits.ops import smoke
+    monkeypatch.setattr(smoke.vast, "show_instances",
+                        lambda: [{"id": 1, "actual_status": "loading"}])
+    stop = threading.Event()
+    threading.Timer(0.1, stop.set).start()
+    t0 = __import__("time").time()
+    with pytest.raises(smoke.Stopped):
+        smoke.wait_for_running(1, stop=stop)
+    assert __import__("time").time() - t0 < 5, "slept through the stop"
+
+
+def _launch_watch(monkeypatch, tmp_path, n):
+    return _watch(monkeypatch, tmp_path, {},
+                  assignments={r: [f"m{r}"] for r in range(n)})
+
+
+def test_launch_all_brings_ranks_up_concurrently(monkeypatch, tmp_path):
+    """The barrier only opens if every rank is in bring-up at the same time:
+    serial acquisition would deadlock here and time out."""
+    n = 4
+    barrier = threading.Barrier(n, timeout=5)
+    watch = _launch_watch(monkeypatch, tmp_path, n)
+
+    def bring_up_rank(rank):
+        barrier.wait()
+        if rank == 2:
+            return None, []
+        return run.Box(rank, 10 + rank, ["-p", "22", "root@h"]), []
+
+    skipped = run.launch_all(range(n), bring_up_rank, watch, threading.Event(),
+                             stagger=0, poll=0.05)
+    assert set(skipped) == {2}
+    assert set(watch.boxes) == {0, 1, 3}
+
+
+def test_an_error_in_one_rank_stops_the_others_before_propagating(monkeypatch,
+                                                                  tmp_path):
+    """Serial acquisition ended the run on an unexpected error; so does this --
+    but only after every other thread has noticed and unwound, so the
+    teardown that follows sees a settled teardown list."""
+    watch = _launch_watch(monkeypatch, tmp_path, 3)
+    stop = threading.Event()
+    started, unwound = [], []
+
+    def bring_up_rank(rank):
+        if rank == 0:
+            raise ValueError("broken")
+        started.append(rank)
+        try:
+            while True:
+                run.check_stop(stop)
+                __import__("time").sleep(0.01)
+        finally:
+            unwound.append(rank)
+
+    with pytest.raises(ValueError):
+        run.launch_all(range(3), bring_up_rank, watch, stop, stagger=0, poll=0.05)
+    # A rank still queued when rank 0 failed is cancelled or stopped before it
+    # rents anything; one that had started must have unwound by now.
+    assert stop.is_set() and sorted(unwound) == sorted(started)
+    assert not [t for t in threading.enumerate() if t.name.startswith("rent")]
+
+
+def test_ctrl_c_on_the_main_thread_stops_every_renting_thread(monkeypatch,
+                                                              tmp_path):
+    watch = _launch_watch(monkeypatch, tmp_path, 3)
+    monkeypatch.setattr(watch, "sweep",
+                        lambda **k: (_ for _ in ()).throw(KeyboardInterrupt()))
+    stop = threading.Event()
+    started, unwound = [], []
+
+    def bring_up_rank(rank):
+        started.append(rank)
+        try:
+            while True:
+                run.check_stop(stop)
+                __import__("time").sleep(0.01)
+        finally:
+            unwound.append(rank)
+
+    with pytest.raises(KeyboardInterrupt):
+        run.launch_all(range(3), bring_up_rank, watch, stop, stagger=0, poll=0.05)
+    assert stop.is_set() and started and sorted(unwound) == sorted(started)
+    assert not [t for t in threading.enumerate() if t.name.startswith("rent")]
+
+
+def test_a_stop_during_the_stagger_starts_nothing(monkeypatch, tmp_path):
+    watch = _launch_watch(monkeypatch, tmp_path, 3)
+    monkeypatch.setattr(watch, "sweep",
+                        lambda **k: (_ for _ in ()).throw(KeyboardInterrupt()))
+    started = []
+    with pytest.raises(KeyboardInterrupt):
+        run.launch_all(range(3), lambda r: (started.append(r), (None, []))[1], watch,
+                       threading.Event(), stagger=60, poll=0.05)
+    assert started == [0]
+
+
+# ---- the 2026-09-24 false condemnation -------------------------------------
+
+def test_one_unreadable_state_does_not_condemn_a_running_box(monkeypatch,
+                                                             tmp_path):
+    """get_json answers None for a failed read exactly as for an absent file.
+    A healthy r1, mid-model, was rescued and destroyed on what was most likely
+    one such read. Missing must persist for NO_STATE_GRACE."""
+    states = {0: _St("running")}
+    w = _watch(monkeypatch, tmp_path, states)
+    w.add(run.Box(0, 1, ["-p", "22", "root@h"]))
+    w.launched_at[0] = 0.0                      # long past FIRST_STATE_DEADLINE
+    w.sweep(deadlines=True, quiet=True)
+    states.clear()                              # one failed read
+    w.sweep(deadlines=True, quiet=True)
+    assert w.pending == {0} and w.verdicts == {}
+    states[0] = _St("running")                  # readable again: grace resets
+    w.sweep(deadlines=True, quiet=True)
+    assert 0 not in w._no_state_since
+
+
+def test_a_state_missing_past_the_grace_still_condemns(monkeypatch, tmp_path):
+    w = _watch(monkeypatch, tmp_path, {})
+    w.add(run.Box(0, 1, ["-p", "22", "root@h"]))
+    w.launched_at[0] = 0.0
+    w.sweep(deadlines=True, quiet=True)
+    assert w.pending == {0}
+    w._no_state_since[0] -= run.NO_STATE_GRACE + 1
+    w.sweep(deadlines=True, quiet=True)
+    assert "no state file" in w.verdicts[0]
+
+
+class _Id(_St):
+    def __init__(self, phase, host, pid, started_at, **k):
+        super().__init__(phase, started_at=started_at, **k)
+        self.host, self.pid = host, pid
+
+
+def test_a_new_worker_on_a_slow_clock_is_not_foreign(monkeypatch, tmp_path):
+    """With a pre-launch snapshot, a file is an earlier run's only if it IS
+    that file. A box whose clock runs ten minutes behind writes a start time
+    'before' its own launch, and the time test alone would ignore it -- and,
+    past the first-state deadline, condemn a working box."""
+    old = _Id("done", "oldhost", 11, _iso(-7200), shards=4)
+    new = _Id("running", "newhost", 22, _iso(-600), shards=4)
+    w = _watch(monkeypatch, tmp_path, {}, assignments={r: [] for r in range(4)})
+    w.remember_existing({0: old})
+    w.add(run.Box(0, 1, ["-p", "22", "root@h"]))
+    assert w._foreign(old, 0)
+    assert not w._foreign(new, 0)
+
+
+def test_without_a_snapshot_entry_the_time_test_still_applies(monkeypatch,
+                                                              tmp_path):
+    w = _watch(monkeypatch, tmp_path, {})
+    w.remember_existing({})
+    w.add(run.Box(0, 1, ["-p", "22", "root@h"]))
+    assert w._foreign(_Id("done", "h", 1, _iso(-3600)), 0)
+
+
+def test_a_release_prints_its_verdict_at_once(monkeypatch, tmp_path, capsys):
+    w = _watch(monkeypatch, tmp_path, {0: _St("done", 1, 1)},
+               have={"dermamnist_m00_features.npz"})
+    w.add(run.Box(0, 1, ["-p", "22", "root@h"]))
+    w.sweep(deadlines=False, quiet=True)
+    assert "[r0] verdict: done" in capsys.readouterr().out
+
+
+# ---- resuming shards only what is missing ---------------------------------
+
+def test_a_resume_selection_keeps_only_the_missing_in_order(tmp_path):
+    import json
+    sel = tmp_path / "sel.json"
+    sel.write_text(json.dumps({"schema": 1, "models": [
+        {"name": f"m{i}", "params": i} for i in range(10)]}))
+    path, k = run.pending_selection(sel, ["m7", "m2", "m5"], tmp_path / "p.json", 8)
+    doc = json.loads(path.read_text())
+    assert [m["name"] for m in doc["models"]] == ["m2", "m5", "m7"]
+    assert doc["models"][0]["params"] == 2
+    assert k == 3, "no rank may be rented for an empty share"
+
+
+def test_the_2026_09_24_leftovers_reshard_evenly():
+    """163 left by a 12-shard run cluster in old ranks 6, 9, 10, 11. Sharding
+    the full list 8 ways gave ranks 0 and 4 nothing; sharding the leftovers
+    cannot leave any rank empty or more than one model heavier than another."""
+    full = [f"m{i:03d}" for i in range(588)]
+    left = [n for i, n in enumerate(full) if i % 12 in (6, 9, 10, 11)]
+    old = [len([n for n in run.shard_models(full, 8, r) if n in set(left)])
+           for r in range(8)]
+    assert min(old) == 0
+    new = [len(run.shard_models(left, 8, r)) for r in range(8)]
+    assert min(new) > 0 and max(new) - min(new) <= 1
+
+
+# ---- a dropped connection mid-pull is retried on the same box -------------
+
+def test_a_dropped_data_pull_is_retried_not_the_box(monkeypatch, tmp_path):
+    ran, fails = [], {"n": 1}
+
+    def ssh(t, c, **k):
+        ran.append(c)
+        if "aws s3 cp" in c and fails["n"]:
+            fails["n"] -= 1
+            raise RuntimeError("r0 data pull failed rc=255: Connection reset by peer")
+        return ""
+
+    monkeypatch.setattr(run, "_sh", lambda cmd, **k: _CP())
+    monkeypatch.setattr(run, "_ssh", ssh)
+    monkeypatch.setattr(run.vast, "scp_args", lambda *a, **k: [])
+    monkeypatch.setattr(run.vast, "stage_credentials", lambda *a, **k: None)
+    tar, sel = tmp_path / "k.tgz", tmp_path / "s.json"
+    tar.write_text("x")
+    sel.write_text('{"models": []}')
+    run.stage_and_launch(run.Box(0, 1, ["-p", "22", "root@h"]), tarball=tar,
+                         selection=sel, creds={}, data_flag="octmnist",
+                         shards=4, prefix=run.PREFIX, known_hosts=None)
+    assert sum("aws s3 cp" in c for c in ran) == 2
+    assert any("setsid" in c for c in ran), "it went on to launch"
+
+
+def test_a_pull_that_keeps_failing_still_fails_the_staging(monkeypatch, tmp_path):
+    def ssh(t, c, **k):
+        if "aws s3 cp" in c:
+            raise RuntimeError("rc=255")
+        return ""
+
+    monkeypatch.setattr(run, "_sh", lambda cmd, **k: _CP())
+    monkeypatch.setattr(run, "_ssh", ssh)
+    monkeypatch.setattr(run.vast, "scp_args", lambda *a, **k: [])
+    monkeypatch.setattr(run.vast, "stage_credentials", lambda *a, **k: None)
+    tar, sel = tmp_path / "k.tgz", tmp_path / "s.json"
+    tar.write_text("x")
+    sel.write_text('{"models": []}')
+    with pytest.raises(RuntimeError):
+        run.stage_and_launch(run.Box(0, 1, ["-p", "22", "root@h"]), tarball=tar,
+                             selection=sel, creds={}, data_flag="octmnist",
+                             shards=4, prefix=run.PREFIX, known_hosts=None)

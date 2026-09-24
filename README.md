@@ -172,8 +172,59 @@ its own shard lands**, gated not on the shard's `done` claim but on that
 shard's bundles being present in S3 by name, which the driver checks by
 recomputing the worker's own partition locally.
 
+**Boxes are rented concurrently**, one thread per shard, from a shared,
+locked offer pool (`launch_all`). Renting one box after another at ~5 min
+each made the last box rented set the finish time. Only the main thread
+receives Ctrl-C, so it stops the renting threads through an Event and waits
+for them; each thread destroys its own half-provisioned box before the
+teardown runs. A thread in the middle of a staging step (up to the 15-minute
+data pull) finishes that step first. This path has been tested only against
+mocks: the first live run with it should be a small one.
+
 Re-running the same command after a partial run extracts only what is missing:
 the worker's resume oracle is S3, so bundles that landed are not recomputed.
+
+### Full-train OCTMNIST (`--max-train 0`)
+
+The production OCTMNIST bundles hold the seed-42 **10,000-row subsample** of
+the 97,477-image train split (val and test are whole). DermaMNIST's train split
+is 7,007 images, under the cap, so its bundles are already full. The full
+OCTMNIST split goes to its **own prefix**, `medmnist_prelogits_fulltrain/`:
+bundle names do not encode `max_train`, so the driver and the worker's
+preflight both refuse to write it into `medmnist_prelogits/`.
+
+The whole split is re-extracted, not only the 87,477 missing rows. Skipping the
+10k would save ~10% of the GPU time (about $0.50), but the result would be a
+bundle kind that no consumer reads, or else a splice that has to pull the 89 GB
+10k set back out of S3 (~$8). A whole-split bundle is an ordinary bundle with
+`max_train=0`. Its seed-42 rows also double as a check against the 10k bundle
+(`compare_subset`, below).
+
+```bash
+# 1. pilot: 4 models on 1 box -- smallest, widest features (vgg19_bn, 4096-d),
+#    slowest (xcit_large_24_p8). Under $0.50.
+python -m kprelogits.ops.run --selection artifacts/octmnist_fulltrain_pilot4.json \
+    --data-flag octmnist --prefix medmnist_prelogits_fulltrain --max-train 0 \
+    --shards 1 --go
+
+# 2. check each pilot bundle against its 10k sibling, row for row
+B=s3://pandora-linear-probe-inputs-939723541836-us-east-1-an
+for m in mobilenetv2_050.lamb_in1k convnext_small.fb_in1k; do
+  aws s3 cp $B/medmnist_prelogits_fulltrain/octmnist/octmnist_${m}_features.npz full_$m.npz
+  aws s3 cp $B/medmnist_prelogits/octmnist/octmnist_${m}_features.npz sub_$m.npz
+done
+python -m kprelogits.compare_subset full_mobilenetv2_050.lamb_in1k.npz sub_mobilenetv2_050.lamb_in1k.npz \
+    full_convnext_small.fb_in1k.npz sub_convnext_small.fb_in1k.npz
+
+# 3. the rest: 841 models, 16 boxes. The pilot's 4 are skipped (S3 is the resume oracle).
+python -m kprelogits.ops.run --selection artifacts/octmnist_fulltrain_841.json \
+    --data-flag octmnist --prefix medmnist_prelogits_fulltrain --max-train 0 \
+    --shards 16 --go
+```
+
+Full-split runs get a 150-minute stale deadline instead of 30, because state
+only updates between models and each model now sees ~5x the images. All runs
+now require `cpu_ram>=32` on the host.
 
 ### Restamping what is already there
 
@@ -241,7 +292,7 @@ currently carries it.
 
 ## Status
 
-`kprelogits` builds and its suite passes (164 tests).
+`kprelogits` builds and its suite passes (286 tests).
 
 - **The GPU path is verified.** On 2026-08-20 `kprelogits/ops/smoke.py` rented
   an RTX 3060 Ti, extracted `mobilenetv2_050.lamb_in1k` (the smallest of the

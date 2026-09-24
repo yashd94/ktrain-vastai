@@ -193,6 +193,41 @@ def drop_hf_weights(model_name: str) -> int:
             shutil.rmtree(d, ignore_errors=True)
         except Exception:
             pass
+    return freed + drop_orphaned_blobs(Path(hub))
+
+
+def drop_orphaned_blobs(hub: Path) -> int:
+    """Delete files in the hub-wide blob store nothing references; bytes freed.
+
+    Recent huggingface_hub keeps weights in ``hub/blobs/<xx>/<sha256>`` and a
+    model's ``models--*/snapshots/*`` holds only symlinks to them, so removing
+    the model directory frees 4 KB and leaves the weights. On 2026-09-25 that
+    filled a 45 GB box after ~300 models with cleanup on, and the shard died
+    of ENOSPC. A blob is kept while any surviving snapshot link resolves to
+    it, so weights for models still to come (a restored cache) survive.
+
+    Nothing else touches ``hub/blobs`` while this runs: it is called between
+    one model's upload and the next model's download.
+    """
+    blobs = hub / "blobs"
+    if not blobs.is_dir():
+        return 0
+    referenced = set()
+    for link in hub.glob("models--*/snapshots/*/**/*"):
+        if link.is_symlink():
+            referenced.add(os.path.realpath(link))
+    freed = 0
+    for f in blobs.rglob("*"):
+        if not f.is_file() or f.is_symlink():
+            continue
+        if os.path.realpath(f) in referenced:
+            continue
+        try:
+            size = f.stat().st_size
+            f.unlink()
+            freed += size
+        except OSError:
+            pass
     return freed
 
 
