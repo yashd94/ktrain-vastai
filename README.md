@@ -91,11 +91,17 @@ The live bucket is
 `medmnist/`, an HF weight cache under `hf_cache/`, and
 `timm_model_param_cache.json` at the root.
 
-**1. Choose backbones.** The param cache is not in this repo; fetch it:
+**1. Choose backbones.** The param cache is committed at
+[artifacts/timm_model_param_cache.json](artifacts/timm_model_param_cache.json),
+a byte-identical copy of the one at the bucket root. It maps each of 1,699 timm
+model names to `{"params": int | null, "status": "ok" | "bad_input" |
+"too_large"}`: `bad_input` means the pretrained config is not 3x224x224 (params
+null), and `too_large` means the model was over the ceiling in force when the
+cache was built (its count is still valid). It is public, for reuse elsewhere, at
+<https://raw.githubusercontent.com/yashd94/ktrain-vastai/main/artifacts/timm_model_param_cache.json>.
 
 ```bash
-aws s3 cp s3://pandora-linear-probe-inputs-939723541836-us-east-1-an/timm_model_param_cache.json .
-python -m kprelogits.select --from-cache --cache timm_model_param_cache.json \
+python -m kprelogits.select --from-cache --cache artifacts/timm_model_param_cache.json \
     --max-params 200000000 --stride 1 --output results/_shared/selected_models.json
 ```
 
