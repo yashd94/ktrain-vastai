@@ -85,8 +85,7 @@ because the extractor's home is a rented box, not a laptop.
 | `FEATURE_BATCH_SIZE`, `NUM_WORKERS` | loader tuning | `128`, `4` |
 | `HF_TOKEN_FILE`, `HF_HOME` | a *path* to the token, never the token | *(none)* |
 
-The live bucket is
-`pandora-linear-probe-inputs-939723541836-us-east-1-an`, holding
+The bucket, named by `S3_BUCKET`, holds
 `medmnist_prelogits/octmnist/` (841 bundles), the pre-staged datasets under
 `medmnist/`, an HF weight cache under `hf_cache/`, and
 `timm_model_param_cache.json` at the root.
@@ -113,7 +112,7 @@ is useful for a cheap trial and is *not* what is in S3.
 once and touches no GPU:
 
 ```bash
-S3_BUCKET=pandora-linear-probe-inputs-939723541836-us-east-1-an \
+S3_BUCKET=<your-bucket> \
 DATA_DIR=./data RESULTS_DIR=./results \
 python -m kprelogits.extract --selection results/_shared/selected_models.json --dry-run
 ```
@@ -208,7 +207,7 @@ python -m kprelogits.ops.run --selection artifacts/octmnist_fulltrain_pilot4.jso
     --shards 1 --go
 
 # 2. check each pilot bundle against its 10k sibling, row for row
-B=s3://pandora-linear-probe-inputs-939723541836-us-east-1-an
+B=s3://$S3_BUCKET
 for m in mobilenetv2_050.lamb_in1k convnext_small.fb_in1k; do
   aws s3 cp $B/medmnist_prelogits_fulltrain/octmnist/octmnist_${m}_features.npz full_$m.npz
   aws s3 cp $B/medmnist_prelogits/octmnist/octmnist_${m}_features.npz sub_$m.npz

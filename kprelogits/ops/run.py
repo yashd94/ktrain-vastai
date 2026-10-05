@@ -66,7 +66,7 @@ from .smoke import (  # see the module docstring on why these come from here
     code_tarball, tail_remote_log, wait_for_running, wait_for_ssh,
 )
 
-BUCKET = "pandora-linear-probe-inputs-939723541836-us-east-1-an"
+BUCKET = os.environ.get("S3_BUCKET", "")
 PREFIX = "medmnist_prelogits"
 
 # A little over smoke's 40 GB: cleanup deletes each bundle after upload, so
@@ -947,6 +947,9 @@ def go(args, models: List[str], rid: str, scratch: Path) -> int:
         print("ORPHANS are billing. Resolve them before renting more.")
         return 1
 
+    if not BUCKET:
+        print("S3_BUCKET is not set; export it to the bucket name.")
+        return 1
     ok, msg = s3.bucket_listable(f"s3://{BUCKET}")
     print(f"  bucket listable: {ok} {msg}")
     if not ok:

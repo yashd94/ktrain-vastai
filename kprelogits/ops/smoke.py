@@ -61,7 +61,7 @@ MODEL = "mobilenetv2_050.lamb_in1k"
 MODEL_PARAMS = 687_680
 DATA_FLAG = "octmnist"
 
-BUCKET = "pandora-linear-probe-inputs-939723541836-us-east-1-an"
+BUCKET = os.environ.get("S3_BUCKET", "")
 PROD_PREFIX = "medmnist_prelogits"
 SMOKE_PREFIX = "medmnist_prelogits_smoke"
 DATA_KEY = f"s3://{BUCKET}/medmnist/{DATA_FLAG}_224.npz"
@@ -647,6 +647,9 @@ def go(rid: str, scratch: Path) -> int:
         print("ORPHANS are billing. Resolve them before renting more.")
         return 1
 
+    if not BUCKET:
+        print("S3_BUCKET is not set; export it to the bucket name.")
+        return 1
     ok, msg = s3.bucket_listable(f"s3://{BUCKET}")
     print(f"  bucket listable: {ok} {msg}")
     if not ok:
