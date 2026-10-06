@@ -186,7 +186,11 @@ the worker's resume oracle is S3, so bundles that landed are not recomputed.
 ### Full-train OCTMNIST (`--max-train 0`)
 
 The production OCTMNIST bundles hold the seed-42 **10,000-row subsample** of
-the 97,477-image train split (val and test are whole). DermaMNIST's train split
+the 97,477-image train split (val and test are whole). The indices, in bundle
+row order, are in
+[artifacts/octmnist_train_subset_seed42.txt](artifacts/octmnist_train_subset_seed42.txt);
+`pytest kprelogits/tests/test_compare_subset.py -k published` regenerates them
+from seed 42 and checks the file. DermaMNIST's train split
 is 7,007 images, under the cap, so its bundles are already full. The full
 OCTMNIST split goes to its **own prefix**, `medmnist_prelogits_fulltrain/`:
 bundle names do not encode `max_train`, so the driver and the worker's

@@ -62,6 +62,13 @@ def test_indices_are_the_seeded_permutation_the_extractor_always_used():
         torch.randperm(97_477, generator=g)[:10_000].tolist()
 
 
+def test_published_indices_regenerate_from_seed_42():
+    # The released list must be what the extractor computes, row for row: it
+    # is how a reader lines the 10k bundles up with the OCTMNIST train split.
+    published = (REPO / "artifacts" / "octmnist_train_subset_seed42.txt").read_text().split()
+    assert [int(i) for i in published] == train_subset_indices(97_477, 10_000, 42)
+
+
 def test_no_subsample_means_no_indices():
     assert train_subset_indices(100, 0) is None
     assert train_subset_indices(100, None) is None
